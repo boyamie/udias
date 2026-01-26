@@ -1,0 +1,22 @@
+# --- [1] 경로 설정 (Path Settings) ---
+# 데이터셋 설정 파일 (.yaml) 경로
+data_path: "C:/Users/BohyunKim/Documents/udias/data/dataset/yolo_data/data.yaml"
+
+# 모델 저장 경로 (runs 폴더)
+project_dir: "C:/Users/BohyunKim/Documents/udias/data/dataset/runs/detect"
+
+# 실험 이름 (결과 폴더명)
+experiment_name: "ship_detection_workers0"
+
+# --- [2] 모델 설정 (Model Settings) ---
+model_type: "yolo11n.pt"  # nano 모델 사용
+pretrained: True
+
+# --- [3] 학습 하이퍼파라미터 (Hyperparameters) ---
+epochs: 50
+batch_size: 16
+img_size: 640
+device: 0         # GPU 번호 (RTX 4060)
+workers: 0        # Windows 필수 설정 (Deadlock 방지)
+optimizer: auto
+verbose: True
