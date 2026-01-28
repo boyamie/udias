@@ -213,3 +213,5 @@ __marimo__/
 *.ckpt
 *.weight
 *.png
+*.jpg
+*.jpeg
