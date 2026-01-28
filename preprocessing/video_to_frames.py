@@ -1,96 +1,108 @@
 import cv2
 import os
-import glob
+import re
 from pathlib import Path
 from tqdm import tqdm
 
-def extract_frames(video_path, output_root, interval=30):
-    """
-    동영상을 읽어 일정 간격으로 프레임을 저장하는 함수 (tqdm 적용)
-    """
-    v_path = Path(video_path)
-    
-    # 1. 저장 경로 설정
-    parent_folder = v_path.parent.name
-    file_stem = v_path.stem
-    save_dir = Path(output_root) / parent_folder / file_stem
-    save_dir.mkdir(parents=True, exist_ok=True)
+# --- [설정: 여기를 꼭 확인하세요!] ---
+BASE_DIR = Path("/workspace/uda/data")  # 서버 경로여야 함
 
-    # 2. 동영상 로드
-    cap = cv2.VideoCapture(str(v_path))
-    
+# 아까 영어로 바꾼 폴더 이름 (day_origin, night_origin)
+SRC_CONFIG = {
+    "Day": BASE_DIR / "day_origin",
+    "Night": BASE_DIR / "night_origin"
+}
+
+# 저장할 폴더
+RGB_SAVE_DIR = BASE_DIR / "dataset/visible_images"
+IR_SAVE_DIR = BASE_DIR / "dataset/infrared_images"
+
+# 프레임 저장 간격 (10프레임마다 1장)
+FRAME_INTERVAL = 10
+# ----------------
+
+def extract_number(filename):
+    """ 파일명 끝의 숫자 추출 (예: ...-IR-1.mp4 -> 1) """
+    match = re.search(r'-(\d+)\.', filename)
+    if match:
+        return int(match.group(1))
+    return None
+
+def process_video(video_path, save_dir, save_prefix):
+    cap = cv2.VideoCapture(str(video_path))
     if not cap.isOpened():
-        print(f"[Error] 파일을 열 수 없습니다: {v_path}")
-        return
-
-    # [중요] 전체 프레임 수 가져오기 (이 부분이 누락되어 에러가 발생했습니다)
-    try:
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-    except:
-        total_frames = 0 # 프레임 수를 못 읽을 경우를 대비한 예외처리
-
+        print(f"❌ 영상 열기 실패: {video_path.name}")
+        return 0
+    
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     frame_idx = 0
     saved_count = 0
     
-    # tqdm 설정: total=total_frames가 반드시 필요합니다.
-    with tqdm(total=total_frames, desc=f"Processing {v_path.name}", unit="frame", leave=False) as pbar:
-        while True:
-            ret, frame = cap.read()
+    # 진행바 표시
+    pbar = tqdm(total=total_frames, desc=f"{save_prefix}", leave=False)
+    
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
             
-            if not ret:
-                break
+        if frame_idx % FRAME_INTERVAL == 0:
+            # 파일명: {접두사}_{프레임번호}.jpg  (예: Day_01_00000.jpg)
+            save_name = f"{save_prefix}_{saved_count:05d}.jpg"
+            cv2.imwrite(str(save_dir / save_name), frame)
+            saved_count += 1
             
-            # interval 마다 저장
-            if frame_idx % interval == 0:
-                save_name = f"{file_stem}_frame_{saved_count:05d}.jpg"
-                save_path = save_dir / save_name
-                
-                # 한글 경로 호환 저장
-                extension = os.path.splitext(save_name)[1]
-                result, encoded_img = cv2.imencode(extension, frame)
-                if result:
-                    with open(save_path, "wb") as f:
-                        encoded_img.tofile(f)
-                
-                saved_count += 1
-            
-            frame_idx += 1
-            pbar.update(1)
-
+        frame_idx += 1
+        pbar.update(1)
+        
     cap.release()
-    tqdm.write(f" -> [완료] {v_path.name}: {saved_count}장 저장됨")
+    pbar.close()
+    return saved_count
 
+def main():
+    # 1. 저장 폴더 생성
+    RGB_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    IR_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+    
+    print("🚀 동영상 -> 이미지 변환 및 분류 시작...")
+    print(f" - 소스 경로: {BASE_DIR}")
 
-if __name__ == "__main__":
-    # --- [설정 구간] ---
-    # 프로젝트 루트 (현재 위치 기준 상위 폴더로 가정)
-    # 필요하다면 절대 경로(예: r"C:\Users\BohyunKim\Documents\udias")를 직접 입력하세요.
-    PROJECT_ROOT = Path(r"C:\Users\BohyunKim\Documents\udias")
-    
-    DATA_DIR = PROJECT_ROOT / "data"
-    OUTPUT_DIR = DATA_DIR / "images"
-    
-    TARGET_FOLDERS = ["야간_원본", "주간_원본"]
-    FRAME_INTERVAL = 15
-    # ------------------
-
-    print(f"[시작] 프레임 추출을 시작합니다. (간격: {FRAME_INTERVAL} 프레임)\n")
-    
-    for folder_name in TARGET_FOLDERS:
-        search_pattern = DATA_DIR / folder_name / "*"
-        video_files = glob.glob(str(search_pattern))
-        
-        valid_extensions = ['.mp4', '.mov', '.avi', '.mkv']
-        target_videos = [f for f in video_files if os.path.splitext(f)[-1].lower() in valid_extensions]
-        
-        if not target_videos:
-            print(f"⚠️  '{folder_name}' 폴더에 동영상이 없습니다. 경로를 확인해주세요: {search_pattern}")
+    for time_type, src_dir in SRC_CONFIG.items():
+        if not src_dir.exists():
+            print(f"⚠️ 폴더 없음, 건너뜀: {src_dir}")
             continue
 
-        print(f"📂 폴더 '{folder_name}' 처리 중 (총 {len(target_videos)}개 파일)")
+        # 폴더 내 모든 파일 검색
+        files = list(src_dir.glob("*"))
         
-        for i, video_path in enumerate(target_videos, 1):
-            print(f"[{i}/{len(target_videos)}] ", end="")
-            extract_frames(video_path, OUTPUT_DIR, interval=FRAME_INTERVAL)
+        # 숫자 기준으로 정렬
+        files.sort(key=lambda x: extract_number(x.name) if extract_number(x.name) is not None else 9999)
+
+        print(f"\n📂 [{time_type}] 폴더 처리 중... (파일 {len(files)}개)")
+
+        for vid_path in files:
+            fname = vid_path.name
             
-    print("\n[종료] 모든 작업이 끝났습니다.")
+            # 숫자 추출
+            vid_id = extract_number(fname)
+            if vid_id is None:
+                continue 
+
+            # 공통 이름 생성 (예: Day_01)
+            new_name_prefix = f"{time_type}_{vid_id:02d}"
+
+            # 분류 및 처리
+            if "-IR-" in fname:
+                print(f"   🔥 [IR] {fname} -> {new_name_prefix}_xxxxx.jpg")
+                process_video(vid_path, IR_SAVE_DIR, new_name_prefix)
+                
+            elif "-RGB-" in fname:
+                print(f"   🌈 [RGB] {fname} -> {new_name_prefix}_xxxxx.jpg")
+                process_video(vid_path, RGB_SAVE_DIR, new_name_prefix)
+
+    print("\n✅ 모든 작업 완료!")
+    print(f" - 가시광선 저장소: {RGB_SAVE_DIR}")
+    print(f" - 적외선 저장소: {IR_SAVE_DIR}")
+
+if __name__ == "__main__":
+    main()

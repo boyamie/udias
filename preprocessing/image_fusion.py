@@ -1,190 +1,140 @@
 import cv2
 import numpy as np
 import os
-import glob
 from pathlib import Path
 from tqdm import tqdm
+import yaml
 
-# --- [1. 헬퍼 함수 정의] ---
+# --- [설정] ---
+BASE_DIR = Path("/workspace/uda/data/dataset")
+RGB_DIR = BASE_DIR / "visible_images"
+IR_DIR = BASE_DIR / "infrared_images"
+SAVE_DIR = BASE_DIR / "yolo_data_paper_fusion"  # 새로운 데이터셋 저장 경로
 
-def imread_korean(path):
-    """ 한글 경로 지원 이미지 읽기 """
-    try:
-        stream = open(path.encode("utf-8"), "rb")
-    except:
-        stream = open(path, "rb")
-    bytes = bytearray(stream.read())
-    numpy_array = np.asarray(bytes, dtype=np.uint8)
-    return cv2.imdecode(numpy_array, cv2.IMREAD_COLOR)
+# 논문 파라미터 (Section 3.1.1 & 3.2.2)
+K_SHARP = 1.0  # 선명화 계수 (k)
+EPSILON = 10   # 조절 파라미터 (epsilon)
 
-def imwrite_korean(path, img):
-    """ 한글 경로 지원 이미지 저장 """
-    extension = os.path.splitext(path)[1]
-    result, encoded_img = cv2.imencode(extension, img)
-    if result:
-        with open(path, "wb") as f:
-            encoded_img.tofile(f)
-            return True
-    return False
+def sharpen_image(image, k=K_SHARP):
+    """논문 식 (1): Laplacian을 이용한 이미지 선명화"""
+    kernel = np.array([[0, -1, 0], [-1, 4, -1], [0, -1, 0]])
+    laplacian = cv2.filter2D(image, -1, kernel)
+    sharpened = cv2.addWeighted(image, 1.0, laplacian, k, 0)
+    return sharpened
 
-def apply_clahe(img):
-    """ 야간 데이터 특징점 검출을 위한 대비 향상 """
-    if img is None: return None
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-    cl = clahe.apply(l)
-    limg = cv2.merge((cl,a,b))
-    return cv2.cvtColor(limg, cv2.COLOR_LAB2BGR)
+def align_and_fuse(rgb_path, ir_path):
+    # 1. 이미지 로드
+    img_rgb = cv2.imread(str(rgb_path))
+    img_ir = cv2.imread(str(ir_path), cv2.IMREAD_GRAYSCALE)
+    
+    if img_rgb is None or img_ir is None:
+        return None
 
-def find_ir_counterpart(rgb_path, search_dir):
-    """ RGB 파일명에 대응하는 IR 파일 찾기 """
-    rgb_name = os.path.basename(rgb_path)
-    if "RGB" in rgb_name:
-        ir_name = rgb_name.replace("RGB", "IR")
-    elif "rgb" in rgb_name:
-        ir_name = rgb_name.replace("rgb", "ir")
+    # 2. 선명화 (Sharpening) - 논문 Section 3.1.1
+    img_rgb_sharp = sharpen_image(img_rgb)
+    img_ir_sharp = sharpen_image(img_ir)
+
+    # 3. SURF 특징점 매칭 및 정렬 (Alignment) - 논문 Section 3.1.2
+    # 논문의 복잡한 Pixel Remapping 대신 Homography로 효율적 구현
+    surf = cv2.xfeatures2d.SURF_create(400)
+    
+    # RGB를 그레이스케일로 변환해 특징점 찾기
+    kp1, des1 = surf.detectAndCompute(cv2.cvtColor(img_rgb_sharp, cv2.COLOR_BGR2GRAY), None)
+    kp2, des2 = surf.detectAndCompute(img_ir_sharp, None)
+
+    if des1 is None or des2 is None or len(kp1) < 4 or len(kp2) < 4:
+        # 매칭 실패 시 그냥 리사이즈해서 융합 (Fallback)
+        img_ir_aligned = cv2.resize(img_ir, (img_rgb.shape[1], img_rgb.shape[0]))
     else:
-        return None
+        # 매칭
+        matcher = cv2.BFMatcher(cv2.NORM_L2, crossCheck=True)
+        matches = matcher.match(des1, des2)
+        matches = sorted(matches, key=lambda x: x.distance)
+
+        # 상위 매칭점 추출
+        good_matches = matches[:50]
+        if len(good_matches) < 4:
+             img_ir_aligned = cv2.resize(img_ir, (img_rgb.shape[1], img_rgb.shape[0]))
+        else:
+            src_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+            dst_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+
+            # Homography 행렬 계산 및 IR 이미지를 RGB 시점으로 변환
+            M, mask = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
+            if M is None:
+                 img_ir_aligned = cv2.resize(img_ir, (img_rgb.shape[1], img_rgb.shape[0]))
+            else:
+                img_ir_aligned = cv2.warpPerspective(img_ir, M, (img_rgb.shape[1], img_rgb.shape[0]))
+
+    # 4. 픽셀 재구성 (Pixel Reconstruction) - 논문 식 (5)
+    # RGB_Enhanced = (RGB + epsilon) * Infrared / 255
     
-    # 동일 폴더 내 검색 (속도 최적화)
-    parent_dir = os.path.dirname(rgb_path)
-    # IR 폴더가 RGB 폴더와 형제 관계일 경우를 대비해 상위 폴더 이름 치환
-    # 예: .../Day_RGB/... -> .../Day_IR/...
-    if "RGB" in parent_dir:
-        ir_parent = parent_dir.replace("RGB", "IR")
-    else:
-        # 폴더 구조가 불명확할 경우 전체 검색 (느림)
-        for root, dirs, files in os.walk(search_dir):
-            if ir_name in files:
-                return os.path.join(root, ir_name)
-        return None
-
-    candidate = os.path.join(ir_parent, ir_name)
-    if os.path.exists(candidate):
-        return candidate
+    img_rgb_float = img_rgb.astype(np.float32)
+    img_ir_float = img_ir_aligned.astype(np.float32)
     
-    # 못 찾았으면 재귀 검색으로 fallback
-    for root, dirs, files in os.walk(search_dir):
-        if ir_name in files:
-            return os.path.join(root, ir_name)
-    return None
+    # IR 이미지를 3채널로 확장 (계산을 위해)
+    img_ir_3ch = cv2.merge([img_ir_float, img_ir_float, img_ir_float])
 
-def process_alignment_and_fusion(img_rgb, img_ir):
-    """ 정렬 및 융합 수행 (성공 시 융합 이미지 반환, 실패 시 None) """
+    # 수식 적용
+    fused = (img_rgb_float + EPSILON) * (img_ir_3ch / 255.0)
     
-    # 1. 특징점 추출을 위한 전처리 (CLAHE)
-    img_rgb_clahe = apply_clahe(img_rgb)
-    img_ir_norm = cv2.normalize(img_ir, None, 0, 255, cv2.NORM_MINMAX)
-
-    gray_rgb = cv2.cvtColor(img_rgb_clahe, cv2.COLOR_BGR2GRAY)
-    gray_ir = cv2.cvtColor(img_ir_norm, cv2.COLOR_BGR2GRAY)
-
-    # 2. SIFT 특징점 검출
-    detector = cv2.SIFT_create()
-    kp1, des1 = detector.detectAndCompute(gray_rgb, None)
-    kp2, des2 = detector.detectAndCompute(gray_ir, None)
-
-    if des1 is None or des2 is None or len(kp1) < 5 or len(kp2) < 5:
-        return None # 특징점 부족
-
-    # 3. 매칭
-    index_params = dict(algorithm=1, trees=5)
-    search_params = dict(checks=50)
-    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    # 클리핑 (0~255 범위 맞추기)
+    fused = np.clip(fused, 0, 255).astype(np.uint8)
     
-    try:
-        matches = flann.knnMatch(des1, des2, k=2)
-    except:
-        return None
+    return fused
 
-    good_matches = []
-    for m, n in matches:
-        if m.distance < 0.75 * n.distance:
-            good_matches.append(m)
+def process_dataset():
+    # 저장 폴더 생성
+    for split in ["train", "val"]:
+        (SAVE_DIR / "images" / split).mkdir(parents=True, exist_ok=True)
+        (SAVE_DIR / "labels" / split).mkdir(parents=True, exist_ok=True)
 
-    # 최소 매칭 점 개수 기준 (너무 적으면 정렬이 부정확함)
-    if len(good_matches) < 10: 
-        return None
+    # 기존 yolo_data(참조용)에서 파일 리스트 가져오기
+    REF_DIR = BASE_DIR / "yolo_data"
+    
+    print(f"🚀 논문 방식(Huang et al. 2026) 데이터 생성 시작...")
+    
+    for split in ["train", "val"]:
+        image_files = list((REF_DIR / "images" / split).glob("*.jpg"))
+        
+        for img_file in tqdm(image_files, desc=f"Processing {split}"):
+            fname = img_file.name
+            
+            # 원본 RGB, IR 파일 경로
+            rgb_path = RGB_DIR / fname
+            ir_path = IR_DIR / fname
+            
+            if not rgb_path.exists() or not ir_path.exists():
+                continue
+                
+            # 1. 융합 (Alignment + Fusion)
+            fused_img = align_and_fuse(rgb_path, ir_path)
+            
+            if fused_img is not None:
+                # 2. 이미지 저장
+                cv2.imwrite(str(SAVE_DIR / "images" / split / fname), fused_img)
+                
+                # 3. 라벨 복사 (기존 라벨 그대로 사용)
+                label_name = fname.replace(".jpg", ".txt")
+                src_label = REF_DIR / "labels" / split / label_name
+                dst_label = SAVE_DIR / "labels" / split / label_name
+                
+                if src_label.exists():
+                    import shutil
+                    shutil.copy(src_label, dst_label)
 
-    # 4. 호모그래피 계산
-    src_pts = np.float32([kp2[m.trainIdx].pt for m in good_matches]).reshape(-1, 1, 2)
-    dst_pts = np.float32([kp1[m.queryIdx].pt for m in good_matches]).reshape(-1, 1, 2)
+    # data.yaml 생성
+    yaml_content = {
+        'path': str(SAVE_DIR),
+        'train': 'images/train',
+        'val': 'images/val',
+        'nc': 1,
+        'names': ['Ship']
+    }
+    with open(SAVE_DIR / "data.yaml", "w") as f:
+        yaml.dump(yaml_content, f)
 
-    H, _ = cv2.findHomography(src_pts, dst_pts, cv2.RANSAC, 5.0)
-    if H is None:
-        return None
-
-    # 5. 정렬 (Warp)
-    h, w = img_rgb.shape[:2]
-    aligned_ir = cv2.warpPerspective(img_ir, H, (w, h))
-
-    # 6. 융합 (Fusion) - 50:50 가중치 합
-    # 논문 베이스 연구를 위해 가장 기초적인 Pixel-level Fusion 적용
-    fused_img = cv2.addWeighted(img_rgb, 0.5, aligned_ir, 0.5, 0)
-
-    return fused_img
-
-
-# --- [2. 메인 실행부] ---
+    print(f"✅ 데이터셋 생성 완료: {SAVE_DIR}")
 
 if __name__ == "__main__":
-    # 경로 설정
-    PROJECT_ROOT = Path(r"C:\Users\BohyunKim\Documents\udias")
-    IMAGE_DIR = PROJECT_ROOT / "data" / "images"
-    
-    # 결과 저장 경로 (YOLO 학습용 데이터셋 폴더)
-    SAVE_DIR = PROJECT_ROOT / "data" / "dataset" / "fused_images"
-    os.makedirs(SAVE_DIR, exist_ok=True)
-
-    print(f"=== 듀얼 스펙트럼 융합 데이터셋 생성 시작 ===")
-    print(f"소스 경로: {IMAGE_DIR}")
-    print(f"저장 경로: {SAVE_DIR}")
-
-    # 모든 RGB 이미지 검색
-    rgb_files = glob.glob(os.path.join(IMAGE_DIR, "**", "*RGB*.jpg"), recursive=True)
-    print(f"총 처리 대상 파일: {len(rgb_files)}개")
-
-    success_count = 0
-    fail_count = 0
-
-    # TQDM으로 진행률 표시
-    pbar = tqdm(rgb_files, unit="img")
-    
-    for rgb_path in pbar:
-        # 파일명 파싱
-        file_name = os.path.basename(rgb_path)
-        
-        # 1. IR 짝꿍 찾기
-        ir_path = find_ir_counterpart(rgb_path, IMAGE_DIR)
-        
-        if not ir_path or not os.path.exists(ir_path):
-            fail_count += 1
-            continue
-
-        # 2. 이미지 읽기
-        img_rgb = imread_korean(rgb_path)
-        img_ir = imread_korean(ir_path)
-
-        # 3. 정렬 및 융합 시도
-        fused_result = process_alignment_and_fusion(img_rgb, img_ir)
-        
-        if fused_result is not None:
-            # 4. 저장
-            # 파일명 규칙: Fused_원본이름.jpg
-            save_name = f"Fused_{file_name}"
-            save_path = os.path.join(SAVE_DIR, save_name)
-            
-            imwrite_korean(save_path, fused_result)
-            success_count += 1
-            pbar.set_description(f"성공: {success_count} / 실패: {fail_count}")
-        else:
-            fail_count += 1
-            # 실패한 경우 로그를 너무 많이 남기지 않고 진행 바에만 표시
-
-    print("\n" + "="*30)
-    print(f"작업 완료!")
-    print(f" - 성공적으로 생성된 이미지: {success_count}장")
-    print(f" - 실패(매칭부족/짝없음): {fail_count}장")
-    print(f" - 저장 위치: {SAVE_DIR}")
-    print("="*30)
+    process_dataset()
