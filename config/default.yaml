@@ -1,0 +1,65 @@
+# udias v2 — 중앙 설정 파일 (모든 스크립트가 이 파일 하나를 읽음)
+# 경로 하드코딩 금지: 환경마다 이 파일만 바꾸면 됨
+
+paths:
+  raw_video_dir: data/raw_videos          # day_origin / night_origin 상위
+  rgb_dir: data/frames/rgb
+  ir_dir: data/frames/ir
+  manifest: data/manifest.jsonl           # 페어 매니페스트 (핵심 산출물)
+  labels_dir: data/labels_rgb             # RGB 좌표계 기준 정답 라벨
+  splits_dir: splits                      # train/val/test 고정 분할 파일
+  outputs_dir: runs
+
+# ── ① Split 재설계 ─────────────────────────────
+split:
+  # 파일명에서 "영상(세션) ID"를 뽑는 정규식. 같은 영상의 프레임은 반드시 같은 split.
+  # 예: "20250712_주간_항만-RGB-3_frame00120.jpg" → group(1) = "20250712_주간_항만-3"
+  video_id_regex: '^(.*?)-(?:RGB|IR|rgb|ir)-(\d+)_frame\d+'
+  video_id_template: '{1}-{2}'            # regex 그룹으로 video_id 조립
+  ratios: {train: 0.7, val: 0.15, test: 0.15}
+  stratify_keys: [time_of_day, scene_type]   # 주/야, 근해/항만 층화
+  seed: 42
+  near_duplicate_check: true              # perceptual hash로 split 간 유사 프레임 검사
+  phash_threshold: 6                      # 해밍거리 임계값 (이하면 near-duplicate 의심)
+
+# ── ② 정렬 (SIFT + RANSAC, H 캐싱) ─────────────
+align:
+  detector: sift                          # SURF 금지 (contrib nonfree → 재현성 문제)
+  ratio_test: 0.75
+  ransac_reproj_thresh: 5.0
+  min_inliers: 15                         # 이 미만이면 aligned=false로 기록 (fallback resize 금지)
+  clahe: true
+  clahe_clip: 3.0
+
+# ── ③ 라벨 QC ─────────────────────────────────
+labeling:
+  autolabel_model: yolo11x.pt             # 초벌은 큰 모델로 (검수 부담 감소)
+  autolabel_conf: 0.25
+  coco_boat_class: 8
+  review_sample_ratio: 1.0                # 사람이 검수할 비율 (초기엔 전수)
+
+# ── ④⑤ 학습 ───────────────────────────────────
+train:
+  img_size: 640
+  epochs: 100
+  batch_size: 16
+  device: 0
+  seeds: [0, 1, 2]                        # mean±std 보고용
+  model: yolo11m.pt
+
+fusion:
+  early:
+    epsilon: 10.0                         # (RGB+ε)·IR/255
+  late:
+    method: wbf                           # weighted box fusion
+    iou_thr: 0.55
+    conf_thr: 0.05
+
+# ── ⑥ 평가 ───────────────────────────────────
+eval:
+  iou_thresholds: [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
+  size_buckets:                            # 픽셀 면적 기준 (COCO 관례, 해상 소형표적에 맞게 조정 가능)
+    small: [0, 1024]                       # < 32^2
+    medium: [1024, 9216]                   # 32^2 ~ 96^2
+    large: [9216, .inf]
+  report_by: [time_of_day, scene_type]     # 장면 유형별 분리 리포트
