@@ -64,3 +64,11 @@ eval:
     medium: [1024, 9216]                   # 32^2 ~ 96^2
     large: [9216, .inf]
   report_by: [time_of_day, scene_type]     # 장면 유형별 분리 리포트
+
+# ── ⑤ Middle fusion (dual-encoder + CBAM + FCOS) ─────
+middle:
+  backbone: resnet18        # torchvision ResNet (resnet18/34/50)
+  pretrained: true          # 오프라인이면 false
+  lr: 0.0001
+  modality_dropout: 0.15    # 학습 중 IR 스트림 무작위 차단 (⑥ 강건성과 연결)
+  workers: 0
