@@ -31,6 +31,7 @@ class PairRecord:
     align_method: str = ""
     label_path: str = ""
     label_verified: bool = False
+    ir_label_path: str = ""               # IR 좌표계 '원생(native)' 주석 (독립 표기, 정렬 지표 ii용); "" = 없음
     split: str = ""                       # train | val | test
     preprocessing_version: str = "v2"
 

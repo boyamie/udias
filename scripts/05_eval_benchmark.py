@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from udias.data.manifest import load_manifest
 from udias.data.align import imread_unicode, warp_ir_to_rgb
 from udias.fusion.late import predict_pair_late
-from udias.fusion.early import pixel_fusion
+from udias.fusion.early import pixel_fusion, stack4
 from udias.eval.det_metrics import (evaluate_by_scene, aggregate_seeds,
                                     format_benchmark_table)
 
@@ -52,23 +52,46 @@ def in_ir(rec):
           else cv2.resize(ir, (rgb.shape[1], rgb.shape[0])))
     return cv2.cvtColor(ir, cv2.COLOR_GRAY2BGR) if ir.ndim == 2 else ir
 
-def in_early(rec):
+def in_early_pixel(rec):
     if not rec.aligned:
         return None
     rgb = imread_unicode(rec.rgb_path)
     ir = warp_ir_to_rgb(rec, imread_unicode(rec.ir_path), rgb.shape)
     return pixel_fusion(rgb, ir, cfg["fusion"]["early"]["epsilon"])
 
-MODELS = {"rgb_only": in_rgb, "ir_only": in_ir, "early_aligned": in_early}
+# 4ch 입력은 numpy 로 넘기면 predict 전처리(BGR→RGB 뒤집기)가 채널을 섞으므로,
+# 학습과 동일한 TIFF 파일 경로로 추론한다 (ultralytics multichannel 규약).
+def in_stack4(rec, use_alignment=True):
+    if use_alignment and not rec.aligned:
+        return None
+    sub = "aligned" if use_alignment else "noalign"
+    p = Path(P["outputs_dir"]) / "eval_cache" / f"stack4_test_{sub}" / f"{rec.pair_id}.tiff"
+    if not p.exists():
+        p.parent.mkdir(parents=True, exist_ok=True)
+        rgb = imread_unicode(rec.rgb_path)
+        ir = imread_unicode(rec.ir_path)
+        ir = (warp_ir_to_rgb(rec, ir, rgb.shape) if use_alignment
+              else cv2.resize(ir, (rgb.shape[1], rgb.shape[0])))
+        cv2.imwrite(str(p), stack4(rgb, ir))
+    return str(p)
+
+MODELS = {"rgb_only": in_rgb, "ir_only": in_ir,
+          "early_stack4": in_stack4, "early_pixel": in_early_pixel,
+          "early_stack4_noalign": lambda rec: in_stack4(rec, use_alignment=False)}
 all_results = {}
 for name, make_input in MODELS.items():
     per_seed = []
     for seed in T["seeds"]:
         w = Path(P["outputs_dir"]) / name / f"seed{seed}" / "weights" / "best.pt"
+        if not w.exists():
+            print(f"[skip] {name} seed{seed}: {w} 없음 (미학습)")
+            per_seed = []
+            break
         preds = predict_all(YOLO(str(w)), make_input)
         per_seed.append(evaluate_by_scene(records, plain_labels, img_size_lookup,
                                           preds, tuple(E["report_by"])))
-    all_results[name] = aggregate_seeds(per_seed)
+    if per_seed:
+        all_results[name] = aggregate_seeds(per_seed)
 
 # late fusion: rgb/ir 시드 쌍으로 앙상블
 per_seed = []

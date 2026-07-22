@@ -3,10 +3,14 @@
 보고서 7장: "Alignment can be evaluated using landmark error,
 intersection-over-union after warping, or downstream detection changes."
 
-세 가지 평가를 제공한다:
+세 가지 평가를 제공한다 (논문 §4.2 의 지표 i/ii/iii):
   1. landmark error: 사람이 클릭한 대응점(소규모 검증셋)에 대한 재투영 오차
-  2. warp IoU: RGB 기준 박스 vs (IR 기준 박스를 H로 투영한 박스)의 IoU
-  3. downstream: 정렬 on/off로 탐지 mAP 비교 (scripts/07에서 수행)
+     — 정렬 ground truth (지표 i)
+  2. native warp IoU: RGB GT 박스 vs (IR 좌표계에서 '독립적으로' 사람이 표기한
+     native IR 박스를 H로 투영한 박스)의 IoU (지표 ii).
+     ※ RGB 라벨을 투영해 만든 IR 라벨은 여기 쓰면 순환(자기 자신과 비교) —
+       반드시 rec.ir_label_path 의 native 주석만 사용한다.
+  3. downstream: 정렬 on/off로 탐지 mAP 비교 (scripts/05 의 noalign ablation)
 """
 from __future__ import annotations
 
@@ -44,8 +48,9 @@ def box_iou(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def warp_iou(boxes_rgb: np.ndarray, boxes_ir: np.ndarray, rec: PairRecord) -> list[float]:
-    """같은 타깃에 대해 RGB 라벨 박스와, IR 라벨 박스를 H로 RGB 좌표계에 투영한
-    박스의 IoU. 타깃 폭보다 잔여 오프셋이 큰지(보고서 4.1의 fine alignment) 판정 가능."""
+    """[주의] 순서 대응(zip)을 가정하는 저수준 유틸. 논문 지표 (ii)에는 쓰지 말 것 —
+    boxes_ir 에 'RGB 라벨을 투영해 만든' IR 라벨을 넣으면 자기 자신과 비교하는
+    순환이 된다 (리뷰 M5). 지표 (ii)는 native_warp_iou_report() 를 사용."""
     if not rec.aligned:
         return []
     H = np.array(rec.H_ir_to_rgb)
@@ -57,6 +62,83 @@ def warp_iou(boxes_rgb: np.ndarray, boxes_ir: np.ndarray, rec: PairRecord) -> li
         warped = np.array([p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()])
         ious.append(box_iou(np.array(b_rgb, dtype=float), warped))
     return ious
+
+
+def load_plain_boxes(path: str | Path, w: int, h: int) -> np.ndarray:
+    """plain YOLO 5열(class cx cy w h, 정규화) → 절대 xyxy (N,4)."""
+    boxes = []
+    p = Path(path)
+    if p.exists():
+        for line in p.read_text().splitlines():
+            f = line.split()
+            if len(f) < 5:
+                continue
+            cx, cy, bw, bh = (float(f[1]) * w, float(f[2]) * h,
+                              float(f[3]) * w, float(f[4]) * h)
+            boxes.append([cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2])
+    return np.asarray(boxes, dtype=float).reshape(-1, 4)
+
+
+def _warp_boxes(boxes_ir: np.ndarray, H: np.ndarray) -> np.ndarray:
+    """IR 좌표계 xyxy → H 로 RGB 좌표계 투영 후 axis-aligned 근사 (N,4)."""
+    out = []
+    for b in boxes_ir:
+        pts = np.float32([[b[0], b[1]], [b[2], b[1]],
+                          [b[2], b[3]], [b[0], b[3]]]).reshape(-1, 1, 2)
+        p = cv2.perspectiveTransform(pts, H).reshape(-1, 2)
+        out.append([p[:, 0].min(), p[:, 1].min(), p[:, 0].max(), p[:, 1].max()])
+    return np.asarray(out, dtype=float).reshape(-1, 4)
+
+
+def native_warp_iou_report(records: list[PairRecord], rgb_label_dir: str | Path,
+                           imread) -> dict:
+    """지표 (ii): native IR 주석이 있는 서브셋에서 warp IoU (greedy 1:1 매칭).
+
+    독립 주석이므로 박스 순서 대응이 없다 → IoU 내림차순 greedy 매칭 후
+    매칭된 쌍의 IoU 와 매칭률을 보고한다. rec.ir_label_path == "" 이거나
+    정렬 실패 페어는 제외 (제외 수는 리포트에 기록).
+    """
+    ious, n_pairs, n_ir, n_rgb, n_match = [], 0, 0, 0, 0
+    skipped_unaligned = 0
+    for rec in records:
+        if not rec.ir_label_path or not Path(rec.ir_label_path).exists():
+            continue
+        if not rec.aligned:
+            skipped_unaligned += 1
+            continue
+        img_ir = imread(rec.ir_path)
+        img_rgb = imread(rec.rgb_path)
+        if img_ir is None or img_rgb is None:
+            continue
+        b_ir = load_plain_boxes(rec.ir_label_path,
+                                img_ir.shape[1], img_ir.shape[0])
+        b_rgb = load_plain_boxes(Path(rgb_label_dir) / f"{rec.pair_id}.txt",
+                                 img_rgb.shape[1], img_rgb.shape[0])
+        if len(b_ir) == 0 and len(b_rgb) == 0:
+            continue
+        n_pairs += 1
+        n_ir += len(b_ir)
+        n_rgb += len(b_rgb)
+        warped = _warp_boxes(b_ir, np.array(rec.H_ir_to_rgb))
+        if len(warped) == 0 or len(b_rgb) == 0:
+            continue
+        iou_mat = np.array([[box_iou(w, g) for g in b_rgb] for w in warped])
+        while iou_mat.size and iou_mat.max() > 0:
+            i, j = np.unravel_index(iou_mat.argmax(), iou_mat.shape)
+            ious.append(float(iou_mat[i, j]))
+            n_match += 1
+            iou_mat[i, :] = -1
+            iou_mat[:, j] = -1
+    return {
+        "pairs_evaluated": n_pairs,
+        "skipped_unaligned": skipped_unaligned,
+        "ir_boxes": n_ir,
+        "rgb_boxes": n_rgb,
+        "matched": n_match,
+        "match_rate_ir": n_match / n_ir if n_ir else None,
+        "mean_iou": float(np.mean(ious)) if ious else None,
+        "median_iou": float(np.median(ious)) if ious else None,
+    }
 
 
 def alignment_report(records: list[PairRecord]) -> dict:

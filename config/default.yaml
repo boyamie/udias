@@ -7,6 +7,8 @@ paths:
   ir_dir: data/frames/ir
   manifest: data/manifest.jsonl           # 페어 매니페스트 (핵심 산출물)
   labels_dir: data/labels_rgb             # RGB 좌표계 기준 정답 라벨
+  ir_native_labels_dir: data/labels_ir_native  # IR 좌표계 '독립' 주석 (지표 ii — 순환 방지, M5)
+  landmarks_dir: data/landmarks           # 수동 대응점 {pair_id}.json (지표 i = 정렬 GT, M4)
   splits_dir: splits                      # train/val/test 고정 분할 파일
   outputs_dir: runs
 
@@ -72,3 +74,9 @@ middle:
   lr: 0.0001
   modality_dropout: 0.15    # 학습 중 IR 스트림 무작위 차단 (⑥ 강건성과 연결)
   workers: 0
+
+# ── ⑥ 강건성 시나리오 (논문 §5.4 — 결정론적 입력 변환) ─────
+robustness:
+  scenarios: [clean, drop_rgb, drop_ir, ir_contrast40, ir_noise03]
+  ir_contrast_factor: 0.4   # IR 대비를 프레임 평균 중심 40%로
+  ir_noise_sigma: 0.3       # 곱셈형 가우시안 노이즈 σ (pair_id 시드 → 결정론)

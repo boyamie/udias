@@ -34,10 +34,15 @@ def _load_plain_labels(path, w, h):
 
 
 class PairDataset(Dataset):
-    def __init__(self, records, plain_label_dir, img_size: int = 640, split=None):
+    def __init__(self, records, plain_label_dir, img_size: int = 640, split=None,
+                 transform=None):
+        """transform: (rec, rgb, ir, ir_valid) -> (rgb, ir, ir_valid).
+        워프/리사이즈 직후·정규화 전의 uint8 이미지에 적용 — 강건성 시나리오용
+        (udias.eval.robustness.apply_scenario 를 partial 로 넘긴다)."""
         self.records = [r for r in records if (split is None or r.split == split)]
         self.label_dir = Path(plain_label_dir)
         self.img = int(img_size)
+        self.transform = transform
 
     def __len__(self):
         return len(self.records)
@@ -53,6 +58,8 @@ class PairDataset(Dataset):
             ir = np.zeros((h0, w0, 3), np.uint8)
         ir_valid = bool(rec.aligned)
         ir = warp_ir_to_rgb(rec, ir, rgb.shape) if rec.aligned else cv2.resize(ir, (w0, h0))
+        if self.transform is not None:      # 강건성 시나리오 (라벨은 불변)
+            rgb, ir, ir_valid = self.transform(rec, rgb, ir, ir_valid)
 
         boxes = _load_plain_labels(self.label_dir / f"{rec.pair_id}.txt", w0, h0)
 

@@ -38,9 +38,14 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
                         epsilon: float = 10.0, use_alignment: bool = True) -> Path:
     """매니페스트 → ultralytics 학습용 디렉토리 생성.
 
-    mode: 'rgb' | 'ir' | 'early'   (stack4는 커스텀 로더 필요 → dataset.py 참고)
+    mode: 'rgb' | 'ir' | 'early' | 'stack4'
+      - 'early'  : 곱셈형 (RGB+ε)·IR/255, 3ch JPG (부차 변형)
+      - 'stack4' : RGB 3ch + IR 1ch 스택, 4ch TIFF (주 베이스라인).
+                   data.yaml 에 channels: 4 를 기록 — ultralytics 의
+                   multichannel 학습 경로(TIFF + channels 키)가 그대로 읽는다.
     use_alignment=False 는 '정렬 없는 융합' ablation용 (IR 단순 resize).
-    정렬 실패(aligned=False) 페어는 early 모드에서 제외하고 개수를 리포트.
+    정렬 실패(aligned=False) 페어는 use_alignment=True 인 융합 모드에서
+    제외하고 개수를 리포트.
     """
     out_root = Path(out_root)
     skipped = 0
@@ -68,7 +73,7 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
                 out_img = cv2.resize(img_ir, (img_rgb.shape[1], img_rgb.shape[0]))
             if out_img.ndim == 2:
                 out_img = cv2.cvtColor(out_img, cv2.COLOR_GRAY2BGR)
-        elif mode == "early":
+        elif mode in ("early", "stack4"):
             img_ir = imread_unicode(rec.ir_path)
             if img_ir is None:
                 continue
@@ -79,11 +84,14 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
                 ir_al = warp_ir_to_rgb(rec, img_ir, img_rgb.shape)
             else:
                 ir_al = cv2.resize(img_ir, (img_rgb.shape[1], img_rgb.shape[0]))
-            out_img = pixel_fusion(img_rgb, ir_al, epsilon)
+            out_img = (stack4(img_rgb, ir_al) if mode == "stack4"
+                       else pixel_fusion(img_rgb, ir_al, epsilon))
         else:
             raise ValueError(mode)
 
-        cv2.imwrite(str(out_root / "images" / rec.split / f"{rec.pair_id}.jpg"), out_img)
+        # 4ch 는 손실 있는 JPG 로 못 담음 → TIFF (ultralytics multichannel 규약)
+        ext = ".tiff" if mode == "stack4" else ".jpg"
+        cv2.imwrite(str(out_root / "images" / rec.split / f"{rec.pair_id}{ext}"), out_img)
         lbl = Path(plain_label_dir) / f"{rec.pair_id}.txt"
         if lbl.exists():
             (out_root / "labels" / rec.split / lbl.name).write_text(lbl.read_text())
@@ -94,6 +102,8 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
     data_yaml = {"path": str(out_root.resolve()), "train": "images/train",
                  "val": "images/val", "test": "images/test",
                  "nc": 1, "names": ["Ship"]}
+    if mode == "stack4":
+        data_yaml["channels"] = 4      # ultralytics multichannel 학습 키
     yp = out_root / "data.yaml"
     yp.write_text(yaml.dump(data_yaml))
     return yp
