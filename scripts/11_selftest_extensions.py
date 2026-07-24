@@ -153,4 +153,30 @@ assert abs(_kappa([0, 1, 0, 1], [0, 1, 0, 1]) - 1.0) < 1e-9
 assert _kappa([0, 0, 0], [0, 0, 0]) is None
 print(f"6. IAA OK            (F1={rep['box_f1']}, vis일치={rep['visibility_agreement']}, kappa 보정)")
 
+# ── 7. M14 데이터카드 통계 + 갤러리 렌더 ──────────────────────
+from udias.eval.dataset_stats import ship_size_areas, size_bin_counts, alignment_by_tod
+from udias.eval.gallery import render_gallery
+grecs = []
+for i in range(12):
+    tod = "day" if i % 2 else "night"
+    gp = tmp / f"g{i}.png"
+    cv2.imwrite(str(gp), np.zeros((200, 300, 3), np.uint8))
+    (lbl_dir / f"g{i}.txt").write_text("0 0.5 0.5 0.2 0.2\n0 0.3 0.3 0.05 0.05\n")
+    grecs.append(PairRecord(pair_id=f"g{i}", video_id="v", rgb_path=str(gp),
+                            ir_path="", scene_type="harbor", time_of_day=tod,
+                            aligned=(i % 3 != 0), align_reproj_error=2.0, split="test"))
+gareas = ship_size_areas(grecs, lbl_dir, lambda r: (300, 200), split="test")
+gbins = size_bin_counts(gareas, {"small": [0, 1024], "medium": [1024, 9216],
+                                 "large": [9216, ".inf"]})
+assert len(gareas) == 24 and sum(gbins.values()) == 24, (gareas.shape, gbins)
+gtod = alignment_by_tod(grecs)
+assert set(gtod) == {"day", "night"} and gtod["day"]["n"] == 6, gtod
+grend = render_gallery({"waves": ["g0", "g2"], "glare": ["g1"]},
+                       lambda p: np.zeros((200, 300, 3), np.uint8),
+                       lambda p: np.array([[40.0, 40.0, 120.0, 120.0]]),
+                       lambda p: np.array([[45.0, 45.0, 125.0, 118.0]]),
+                       tmp / "gallery.pdf", per_tag=3)
+assert grend == {"waves": 2, "glare": 1} and (tmp / "gallery.pdf").exists(), grend
+print(f"7. M14 figures OK    (크기 S/M/L={gbins}, 갤러리 렌더={grend})")
+
 print("\nSELFTEST-EXTENSIONS PASS")

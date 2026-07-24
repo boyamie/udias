@@ -1,0 +1,12 @@
+# udias 파이프라인 의존성 (Python 3.10+)
+# 핵심 (매니페스트·정렬·평가·middle fusion)
+numpy
+opencv-python
+pyyaml
+torch
+torchvision
+# 탐지 학습·late fusion
+ultralytics
+ensemble-boxes
+# 데이터카드 그림·정성 갤러리 (scripts/14, 15)
+matplotlib
