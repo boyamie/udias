@@ -114,4 +114,23 @@ with torch.no_grad():
 assert len(out) == 2
 print("4. transform hook OK (drop_ir → ir_valid=False → 게이트 순전파)")
 
+# ── 5. native IR 서브셋 선정 (B4) — 층화·aligned-only·결정론 ────
+from udias.eval.align_metrics import select_native_ir_subset, native_subset_coverage
+srecs = []
+for i in range(30):
+    srecs.append(PairRecord(pair_id=f"hd{i}", video_id="v", rgb_path="", ir_path="",
+                            scene_type="harbor", time_of_day="day", aligned=True))
+for i in range(5):
+    srecs.append(PairRecord(pair_id=f"on{i}", video_id="v", rgb_path="", ir_path="",
+                            scene_type="open_water", time_of_day="night", aligned=True))
+for i in range(10):
+    srecs.append(PairRecord(pair_id=f"un{i}", video_id="v", rgb_path="", ir_path="",
+                            scene_type="harbor", time_of_day="day", aligned=False))
+picked, stats = select_native_ir_subset(srecs, per_cell=20, seed=42)
+assert stats[("harbor", "day")] == (20, 30), stats          # 30중 20 (상한)
+assert stats[("open_water", "night")] == (5, 5), stats       # 부족 셀은 전부
+assert all(not p.startswith("un") for p in picked), "unaligned 페어가 선정됨"
+assert picked == select_native_ir_subset(srecs, per_cell=20, seed=42)[0], "비결정론"
+print(f"5. native subset OK  (층화 {stats}, aligned-only, 결정론)")
+
 print("\nSELFTEST-EXTENSIONS PASS")

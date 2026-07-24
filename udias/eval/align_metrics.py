@@ -64,6 +64,47 @@ def warp_iou(boxes_rgb: np.ndarray, boxes_ir: np.ndarray, rec: PairRecord) -> li
     return ious
 
 
+def select_native_ir_subset(records, per_cell: int = 20, seed: int = 42):
+    """지표 (ii)용 native IR 주석 대상 페어를 재현 가능하게 선정 (논문 §4.3).
+
+    규칙: 정렬 성공(aligned=True) 페어를 (scene_type, time_of_day) 셀로 층화한 뒤
+    셀마다 최대 per_cell 개를 고정 시드로 무작위 추출한다. 셀 페어 수가 per_cell
+    미만이면 그 셀은 전부 포함(개수 부족은 리포트). aligned=False 페어는 H 워프가
+    불가능하므로 대상에서 제외한다.
+
+    반환: (worklist pair_id 리스트[정렬됨], 셀별 {(scene,tod): (선정, 가용)} dict)
+    """
+    import random
+    cells = {}
+    for r in records:
+        if not r.aligned:
+            continue
+        cells.setdefault((r.scene_type, r.time_of_day), []).append(r.pair_id)
+
+    picked, stats = [], {}
+    for cell, ids in sorted(cells.items()):
+        ids = sorted(ids)                       # 결정론: 먼저 정렬 후 시드 셔플
+        rng = random.Random(f"{seed}:{cell[0]}:{cell[1]}")
+        rng.shuffle(ids)
+        take = ids[:per_cell]
+        picked.extend(take)
+        stats[cell] = (len(take), len(ids))
+    return sorted(picked), stats
+
+
+def native_subset_coverage(records, worklist: set) -> dict:
+    """worklist 대비 native 주석 완료 현황 (scripts/10 검증용)."""
+    done = {r.pair_id for r in records
+            if r.ir_label_path and Path(r.ir_label_path).exists()}
+    wl_done = worklist & done
+    return {
+        "worklist": len(worklist),
+        "annotated_in_worklist": len(wl_done),
+        "missing": sorted(worklist - done),
+        "annotated_off_worklist": sorted(done - worklist),
+    }
+
+
 def load_plain_boxes(path: str | Path, w: int, h: int) -> np.ndarray:
     """plain YOLO 5열(class cx cy w h, 정규화) → 절대 xyxy (N,4)."""
     boxes = []
