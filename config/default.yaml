@@ -9,6 +9,9 @@ paths:
   labels_dir: data/labels_rgb             # RGB 좌표계 기준 정답 라벨
   ir_native_labels_dir: data/labels_ir_native  # IR 좌표계 '독립' 주석 (지표 ii — 순환 방지, M5)
   ir_native_worklist: splits/ir_native_worklist.txt  # native 주석 대상 페어 목록 (scripts/12 생성)
+  iaa_worklist: splits/iaa_worklist.txt   # 이중 주석(IAA) 대상 페어 목록 (scripts/13 생성)
+  iaa_labels_a: data/labels_iaa/annotator_a  # 주석자 A 확장 라벨
+  iaa_labels_b: data/labels_iaa/annotator_b  # 주석자 B 확장 라벨
   landmarks_dir: data/landmarks           # 수동 대응점 {pair_id}.json (지표 i = 정렬 GT, M4)
   splits_dir: splits                      # train/val/test 고정 분할 파일
   outputs_dir: runs
@@ -44,6 +47,10 @@ labeling:
   # 지표 (ii) native IR 서브셋 선정 (§4.3) — aligned 페어를 장면×주야 층화, 셀당 N 고정시드
   native_ir_per_cell: 20
   native_ir_seed: 42
+  # 주석자 간 일치도(IAA, B3) — 이중 주석 서브셋: 장면×주야 층화, 셀당 N 고정시드 (전체 페어 대상)
+  iaa_per_cell: 10
+  iaa_seed: 7
+  iaa_iou_thr: 0.5
 
 # ── ④⑤ 학습 ───────────────────────────────────
 train:

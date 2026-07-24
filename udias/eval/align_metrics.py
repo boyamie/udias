@@ -64,32 +64,39 @@ def warp_iou(boxes_rgb: np.ndarray, boxes_ir: np.ndarray, rec: PairRecord) -> li
     return ious
 
 
-def select_native_ir_subset(records, per_cell: int = 20, seed: int = 42):
-    """지표 (ii)용 native IR 주석 대상 페어를 재현 가능하게 선정 (논문 §4.3).
+def stratified_subset(records, per_cell: int = 20, seed: int = 42,
+                      aligned_only: bool = True, tag: str = "subset"):
+    """(scene_type, time_of_day) 층화 후 셀당 per_cell 개를 고정 시드로 추출.
 
-    규칙: 정렬 성공(aligned=True) 페어를 (scene_type, time_of_day) 셀로 층화한 뒤
-    셀마다 최대 per_cell 개를 고정 시드로 무작위 추출한다. 셀 페어 수가 per_cell
-    미만이면 그 셀은 전부 포함(개수 부족은 리포트). aligned=False 페어는 H 워프가
-    불가능하므로 대상에서 제외한다.
+    재현 가능한 서브셋 선정의 공용 루틴 (native-IR 지표 ii, 이중주석 IAA 등이 공유).
+    aligned_only=True 면 정렬 성공 페어만 대상(H 워프가 필요한 지표 ii용);
+    False 면 전체 페어 대상(RGB 프레임 주석 일치도 등). tag 는 셀별 시드 분리에
+    쓰여 서로 다른 용도가 같은 셀에서 다른 표본을 뽑도록 한다.
 
-    반환: (worklist pair_id 리스트[정렬됨], 셀별 {(scene,tod): (선정, 가용)} dict)
+    반환: (pair_id 리스트[정렬됨], 셀별 {(scene,tod): (선정, 가용)} dict)
     """
     import random
     cells = {}
     for r in records:
-        if not r.aligned:
+        if aligned_only and not r.aligned:
             continue
         cells.setdefault((r.scene_type, r.time_of_day), []).append(r.pair_id)
 
     picked, stats = [], {}
     for cell, ids in sorted(cells.items()):
         ids = sorted(ids)                       # 결정론: 먼저 정렬 후 시드 셔플
-        rng = random.Random(f"{seed}:{cell[0]}:{cell[1]}")
+        rng = random.Random(f"{tag}:{seed}:{cell[0]}:{cell[1]}")
         rng.shuffle(ids)
         take = ids[:per_cell]
         picked.extend(take)
         stats[cell] = (len(take), len(ids))
     return sorted(picked), stats
+
+
+def select_native_ir_subset(records, per_cell: int = 20, seed: int = 42):
+    """지표 (ii)용 native IR 주석 대상 페어 선정 (§4.3) — aligned 페어만 층화 추출."""
+    return stratified_subset(records, per_cell, seed,
+                             aligned_only=True, tag="native_ir")
 
 
 def native_subset_coverage(records, worklist: set) -> dict:

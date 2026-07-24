@@ -133,4 +133,24 @@ assert all(not p.startswith("un") for p in picked), "unaligned 페어가 선정�
 assert picked == select_native_ir_subset(srecs, per_cell=20, seed=42)[0], "비결정론"
 print(f"5. native subset OK  (층화 {stats}, aligned-only, 결정론)")
 
+# ── 6. IAA 주석자 간 일치도 (B3) ───────────────────────────────
+from udias.labeling.qc import load_extended_labels
+from udias.eval.agreement import iaa_report, _kappa
+iaa_dir = tmp / "iaa"
+(iaa_dir / "a").mkdir(parents=True)
+(iaa_dir / "b").mkdir(parents=True)
+irec = [PairRecord(pair_id="q0", video_id="v", rgb_path="", ir_path="",
+                   scene_type="harbor", time_of_day="day", aligned=True)]
+(iaa_dir / "a" / "q0.txt").write_text(
+    "0 0.3 0.3 0.2 0.2 2 0\n0 0.7 0.7 0.2 0.2 0 0\n0 0.5 0.1 0.1 0.1 2 0\n")
+(iaa_dir / "b" / "q0.txt").write_text(
+    "0 0.3 0.3 0.2 0.2 2 0\n0 0.71 0.7 0.2 0.2 1 0\n")
+rep = iaa_report(irec, iaa_dir / "a", iaa_dir / "b", lambda r: (100, 100),
+                 load_extended_labels, iou_thr=0.5)
+assert rep["matched"] == 2 and rep["only_a"] == 1 and abs(rep["box_f1"] - 0.8) < 1e-9, rep
+assert abs(rep["visibility_agreement"] - 0.5) < 1e-9, rep
+assert abs(_kappa([0, 1, 0, 1], [0, 1, 0, 1]) - 1.0) < 1e-9
+assert _kappa([0, 0, 0], [0, 0, 0]) is None
+print(f"6. IAA OK            (F1={rep['box_f1']}, vis일치={rep['visibility_agreement']}, kappa 보정)")
+
 print("\nSELFTEST-EXTENSIONS PASS")
