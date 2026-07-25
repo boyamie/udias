@@ -2,19 +2,21 @@
 # 경로 하드코딩 금지: 환경마다 이 파일만 바꾸면 됨
 
 paths:
-  raw_video_dir: data/raw_videos          # day_origin / night_origin 상위
-  rgb_dir: data/frames/rgb
-  ir_dir: data/frames/ir
-  manifest: data/manifest.jsonl           # 페어 매니페스트 (핵심 산출물)
-  labels_dir: data/labels_rgb             # RGB 좌표계 기준 정답 라벨
-  ir_native_labels_dir: data/labels_ir_native  # IR 좌표계 '독립' 주석 (지표 ii — 순환 방지, M5)
-  ir_native_worklist: splits/ir_native_worklist.txt  # native 주석 대상 페어 목록 (scripts/12 생성)
-  iaa_worklist: splits/iaa_worklist.txt   # 이중 주석(IAA) 대상 페어 목록 (scripts/13 생성)
-  iaa_labels_a: data/labels_iaa/annotator_a  # 주석자 A 확장 라벨
-  iaa_labels_b: data/labels_iaa/annotator_b  # 주석자 B 확장 라벨
-  landmarks_dir: data/landmarks           # 수동 대응점 {pair_id}.json (지표 i = 정렬 GT, M4)
-  splits_dir: splits                      # train/val/test 고정 분할 파일
-  outputs_dir: runs
+  # 주의: 모든 스크립트는 repo 루트(code/)에서 실행한다는 전제. 경로는 code/ 기준 상대경로.
+  #       원천 영상·파생물 전부 sibling 폴더 ../data (= maritime/data) 하나에 모은다.
+  raw_video_dir: ../data                   # 아래 day/ night/ (실제 원본 위치). video_to_frames 가 tod 하위폴더 자동탐지
+  rgb_dir: ../data/frames/rgb
+  ir_dir: ../data/frames/ir
+  manifest: ../data/manifest.jsonl         # 페어 매니페스트 (핵심 산출물)
+  labels_dir: ../data/labels_rgb           # RGB 좌표계 기준 정답 라벨
+  ir_native_labels_dir: ../data/labels_ir_native  # IR 좌표계 '독립' 주석 (지표 ii — 순환 방지, M5)
+  ir_native_worklist: ../data/splits/ir_native_worklist.txt  # native 주석 대상 페어 목록 (scripts/12 생성)
+  iaa_worklist: ../data/splits/iaa_worklist.txt   # 이중 주석(IAA) 대상 페어 목록 (scripts/13 생성)
+  iaa_labels_a: ../data/labels_iaa/annotator_a  # 주석자 A 확장 라벨
+  iaa_labels_b: ../data/labels_iaa/annotator_b  # 주석자 B 확장 라벨
+  landmarks_dir: ../data/landmarks         # 수동 대응점 {pair_id}.json (지표 i = 정렬 GT, M4)
+  splits_dir: ../data/splits               # train/val/test 고정 분할 파일
+  outputs_dir: ../data/runs
 
 # ── ① Split 재설계 ─────────────────────────────
 split:
