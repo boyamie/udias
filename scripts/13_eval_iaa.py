@@ -21,7 +21,7 @@ from udias.labeling.qc import load_extended_labels
 from udias.eval.align_metrics import stratified_subset
 from udias.eval.agreement import iaa_report
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml", encoding="utf-8"))
 P, L = cfg["paths"], cfg["labeling"]
 records = load_manifest(P["manifest"])
 

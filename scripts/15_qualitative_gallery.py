@@ -23,7 +23,7 @@ from udias.eval.gallery import render_gallery
 
 if len(sys.argv) < 3:
     print(__doc__); sys.exit(1)
-cfg = yaml.safe_load(open(sys.argv[1]))
+cfg = yaml.safe_load(open(sys.argv[1], encoding="utf-8"))
 P = cfg["paths"]
 selection = json.loads(Path(sys.argv[2]).read_text())
 preds = json.loads(Path(sys.argv[3]).read_text()) if len(sys.argv) > 3 else {}

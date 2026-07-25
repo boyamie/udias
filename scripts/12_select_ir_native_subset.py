@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from udias.data.manifest import load_manifest
 from udias.eval.align_metrics import select_native_ir_subset
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml", encoding="utf-8"))
 P, L = cfg["paths"], cfg["labeling"]
 records = load_manifest(P["manifest"])
 

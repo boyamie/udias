@@ -14,7 +14,7 @@ from udias.fusion.early import pixel_fusion, stack4
 from udias.eval.det_metrics import (evaluate_by_scene, aggregate_seeds,
                                     format_benchmark_table)
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "configs/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "configs/default.yaml", encoding="utf-8"))
 P, T, E = cfg["paths"], cfg["train"], cfg["eval"]
 plain_labels = Path(P["labels_dir"]) / "plain"
 records = [r for r in load_manifest(P["manifest"]) if r.split == "test"]

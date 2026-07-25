@@ -10,7 +10,7 @@ from udias.data.manifest import load_manifest, save_manifest
 from udias.data.splits import (assign_splits, check_video_leakage,
                                check_near_duplicates, export_split_files, summarize)
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "configs/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "configs/default.yaml", encoding="utf-8"))
 P, S = cfg["paths"], cfg["split"]
 
 records = load_manifest(P["manifest"])

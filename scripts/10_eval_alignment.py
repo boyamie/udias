@@ -26,7 +26,7 @@ from udias.data.align import imread_unicode
 from udias.eval.align_metrics import (landmark_error, native_warp_iou_report,
                                       native_subset_coverage, alignment_report)
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml", encoding="utf-8"))
 P = cfg["paths"]
 records = load_manifest(P["manifest"])
 

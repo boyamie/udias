@@ -21,7 +21,7 @@ from udias.data.align import imread_unicode
 from udias.eval.dataset_stats import (ship_size_areas, size_bin_counts,
                                       alignment_by_tod)
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml"))
+cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml", encoding="utf-8"))
 P, E = cfg["paths"], cfg["eval"]
 out_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else Path(P["outputs_dir"]) / "figures"
 out_dir.mkdir(parents=True, exist_ok=True)
