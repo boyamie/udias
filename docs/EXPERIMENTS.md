@@ -117,4 +117,14 @@ IR = Hanwha QUANTUM RED, RGB = iPhone 14.
 - §3.2 RGB resolution → `$1920\times1080$ or $3840\times2160$ (17 of the 22 clips at the latter)`
 - §3.2 RGB fps → `a frame rate of $25$--$60$~fps (predominantly $30$ or $60$~fps, ... variable $24$--$29$~fps)`
 - §3.4 stride sentence → time-based 0.5 s wording
+
+## CORRECTION (2026-07-26, home): the edits above were NOT actually persisted
+The 2026-07-25 Overleaf "dual" project download (md5-identical to the local pre-edit
+main.tex) showed NONE of the §3.1/§3.2/§3.4 edits above — they were lost / not saved.
+Re-applied for real on 2026-07-26 to the local `main_revised2.tex` AND re-uploaded to
+Overleaf (recompiled clean, Errors 0). Now genuinely in both:
+- §3.1 IR res/fps/codec = 640×480 / ~30 fps / MP4-H.264   ✅ (LWIR band + §3.2 HDR still 🙋)
+- §3.2 RGB res/fps = 1080p/4K (17@4K) / 24–60 fps          ✅
+- §3.4 fixed frame-stride → fixed 0.5 s time interval       ✅
+- stale stride comments (header + §3.4) refreshed           ✅
 Remaining red placeholders in §3.1-3.4 are all 🙋 author-only (see tracker above).
