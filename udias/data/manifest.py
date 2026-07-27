@@ -22,7 +22,8 @@ class PairRecord:
     rgb_path: str
     ir_path: str
     time_of_day: str = "unknown"          # day | night | unknown
-    scene_type: str = "unknown"           # open_water | nearshore | harbor | unknown
+    scene_type: str = "unknown"           # open_water | nearshore | bridge | harbor | unknown
+                                          #   bridge = 교량 인근(높은 전경 구조물 → 잔여 시차 최대, §4.2)
     capture_time: str = ""                # optional ISO timestamp
     aligned: bool = False
     H_ir_to_rgb: Optional[list] = None    # 3x3, IR -> RGB

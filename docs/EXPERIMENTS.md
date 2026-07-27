@@ -69,28 +69,35 @@ IR = Hanwha QUANTUM RED, RGB = iPhone 14.
 | RGB fps | 60 / 30 / variable 24–28.8 (night) | ✅ | file probe (varies) |
 | HDR / stabilization settings | — | 🙋 | iPhone capture setting; not in file header |
 
-### §3.3 Acquisition Geometry & Sessions
+### §3.3 Acquisition Geometry & Sessions (author answers 2026-07-26)
 | placeholder | value | status | source |
 |---|---|---|---|
-| platform / mounting / baseline | — | 🙋 | author |
-| distance range to vessels | — | 🙋 | author |
-| # daytime sessions | 9 day videos (confirm=sessions?) | 🙋 | author |
-| # nighttime sessions | 13 night videos (confirm?) | 🙋 | author |
-| location description | — | 🙋 | author |
-| dates / season | — | 🙋 | author |
-| scene types | open water / nearshore / harbor? | 🙋 | author (also per-video scene_type tags) |
+| platform / mounting / baseline | **hand-held aboard a vessel under way**, two devices held side by side, baseline ~10–20 cm | ✅ | author |
+| distance range to vessels | **not instrumented** — paper now declines to quote a range and points to the ship-size distribution instead | ✅ | author |
+| # daytime / nighttime | **9 day / 13 night source videos** (written as "source videos", not "sessions") | ✅ | file inventory |
+| location description | GPS coordinates — author will disclose to that granularity | 🙋 | author (needs the actual coordinates) |
+| dates / season | read from source-file timestamps | ⏳ | file mtime probe on school PC |
+| scene types | **open water / nearshore / bridge** — "bridge" added as a new `scene_type` category (tall foreground structure ⇒ worst-case parallax, ties to §4.2) | ✅ | author |
 
-### §3.4 Synchronization
+### §3.4 Synchronization (author answers 2026-07-26)
 | placeholder | value | status | source |
 |---|---|---|---|
-| sync method | no hardware trigger; method? | 🙋 | author |
-| residual temporal offset bound | — | 🙋 | author + eyeball check on Day_04 pairs |
+| sync method | **manual simultaneous recording start** — no hardware trigger, no common clock, no post-hoc offset estimation | ✅ | author |
+| residual temporal offset bound | **~1 s, i.e. LARGER than the 0.5 s sampling interval** — stated plainly as the least-controlled part of acquisition | ⚠️ | author estimate; still needs an empirical tightening on a shared visual event |
+
+> ⚠️ **Biggest reviewer risk in the paper.** Hand-held + ship-borne + ~1 s offset means the *background* also shifts between the two frames of a pair, not just moving vessels. §3.4, §4.2 and §6 were rewritten on 2026-07-26 to say this explicitly rather than imply a static-background model. Highest-value fix for any future capture: hardware trigger / clapper-style shared visual event / audio alignment.
 | **"fixed stride of ten frames"** | → **time-based 0.5 s sampling** | ✏️ | pipeline changed; text must be updated |
 
-### §6 Ethics
+### §6 Ethics + back-matter (author answers 2026-07-26)
 | placeholder | value | status | source |
 |---|---|---|---|
-| vessel identifiability policy | blurred / retained | 🙋 | author policy decision |
+| vessel identifiability policy | **retained, not blurred** — justified in-text (commercial vessels in public waterways, not identifiable persons; hull markings are part of the visible-band signal a detector must handle) | ✅ | author |
+| Funding | **"This research received no external funding."** | ✅ | author |
+| Supervision (Author Contributions) | **D.L. (Dohoon Lee)** | ✅ | author |
+| Conflicts of Interest | none declared + manufacturer-non-involvement statement; still 🙋 confirm no author has a financial relationship with Hanwha | ⚠️ | author to confirm |
+| §3.1 LWIR spectral band | **"not publicly specified by the manufacturer"** (honest fallback; no inference from imagery) | ✅ | author/vendor |
+| §3.2 HDR / stabilization | — | 🙋 | author (iPhone capture setting, not in file header) |
+| Zenodo DOI | — | ⏳ | mint after upload |
 
 ### §4.3 / §5 Benchmark result tables (pages 4–6, 8)
 | group | status | source |
