@@ -49,23 +49,43 @@ def check_multichannel_support() -> None:
 
 def main():
     """Windows spawn-mode DataLoader 워커가 본 모듈을 재임포트하므로
-    학습 루프는 반드시 __main__ 가드 안에서 실행한다."""
+    학습 루프는 반드시 __main__ 가드 안에서 실행한다.
+
+    2단계 구조 (2026-07-28):
+      1) 데이터셋 5종을 먼저 전부 export (idempotent — 있으면 스킵)
+      2) 학습은 seed-바깥 루프: seed0 를 5개 baseline 전부 → seed1 → seed2.
+         부분 완주 시에도 Table 2 의 '행 커버리지'가 먼저 확보된다.
+    """
+    yamls, train_kws = {}, {}
     for name, kw in EXPERIMENTS.items():
-        data_yaml = export_yolo_dataset(records, plain_labels,
-                                        Path(P["outputs_dir"]) / "datasets" / name,
-                                        epsilon=cfg["fusion"]["early"]["epsilon"], **kw)
-        train_kw = {}
         if kw["mode"] == "stack4":
             check_multichannel_support()
-            # 색공간 augment 는 4ch 에서 의미가 없고 버전에 따라 실패 → 명시적 off
-            train_kw = dict(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0)
-        for seed in T["seeds"]:
+        yamls[name] = export_yolo_dataset(records, plain_labels,
+                                          Path(P["outputs_dir"]) / "datasets" / name,
+                                          epsilon=cfg["fusion"]["early"]["epsilon"],
+                                          max_side=cfg["fusion"].get("export_max_side"), **kw)
+        # 색공간 augment 는 4ch 에서 의미가 없고 버전에 따라 실패 → 명시적 off
+        train_kws[name] = (dict(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0)
+                           if kw["mode"] == "stack4" else {})
+
+    out_root = Path(P["outputs_dir"])
+    for seed in T["seeds"]:
+        for name in EXPERIMENTS:
+            # 완료 판정: results.csv 의 epoch 행 수 ≥ 목표 epochs.
+            # (best.pt 는 학습 도중에도 생기므로 완료 마커로 쓰면 중단 런을 건너뛴다)
+            rcsv = out_root / name / f"seed{seed}" / "results.csv"
+            if rcsv.exists():
+                n_done = max(0, len(rcsv.read_text(encoding="utf-8").splitlines()) - 1)
+                if n_done >= T["epochs"]:
+                    print(f"[skip] {name}/seed{seed} 이미 완료 ({n_done} epochs)")
+                    continue
             model = YOLO(T["model"])
-            model.train(data=str(data_yaml), epochs=T["epochs"], imgsz=T["img_size"],
+            model.train(data=str(yamls[name]), epochs=T["epochs"], imgsz=T["img_size"],
                         batch=T["batch_size"], device=T["device"], seed=seed,
+                        workers=T.get("workers", 2),   # 4K 원본 디코드 × 다워커 = RAM 고갈 방지
                         project=str(Path(P["outputs_dir"]) / name),
                         name=f"seed{seed}", exist_ok=True, deterministic=True,
-                        **train_kw)
+                        **train_kws[name])
 
 
 if __name__ == "__main__":

@@ -66,12 +66,16 @@ labeling:
 train:
   img_size: 640
   epochs: 100
-  batch_size: 16
+  batch_size: 8
   device: 0
   seeds: [0, 1, 2]                        # mean±std 보고용
   model: yolo11m.pt
+  # 2026-07-28: 16GB RAM 머신에서 workers=8(기본)이 4K 프레임 디코드 버퍼로 시스템 RAM 고갈
+  # → cv2 CPU 할당 실패 + 위장 CUDA OOM("free인데 OOM"). workers 2로 제한.
+  workers: 2
 
 fusion:
+  export_max_side: 960                    # 학습용 export 다운스케일 (긴 변). 디스크·RAM·디코드 대응.
   early:
     epsilon: 10.0                         # (RGB+ε)·IR/255
   late:

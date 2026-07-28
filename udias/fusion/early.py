@@ -35,7 +35,8 @@ def stack4(img_rgb: np.ndarray, ir_aligned: np.ndarray) -> np.ndarray:
 
 def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
                         out_root: str | Path, mode: str, *,
-                        epsilon: float = 10.0, use_alignment: bool = True) -> Path:
+                        epsilon: float = 10.0, use_alignment: bool = True,
+                        max_side: int | None = None) -> Path:
     """매니페스트 → ultralytics 학습용 디렉토리 생성.
 
     mode: 'rgb' | 'ir' | 'early' | 'stack4'
@@ -53,9 +54,13 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
         (out_root / "images" / split).mkdir(parents=True, exist_ok=True)
         (out_root / "labels" / split).mkdir(parents=True, exist_ok=True)
 
+    ext = ".tiff" if mode == "stack4" else ".jpg"
     for rec in tqdm(records, desc=f"export[{mode}]"):
         if rec.split not in ("train", "val", "test"):
             continue
+        out_path = out_root / "images" / rec.split / f"{rec.pair_id}{ext}"
+        if out_path.exists():
+            continue                     # idempotent 재실행: 이미 내보낸 프레임은 건너뜀
         img_rgb = imread_unicode(rec.rgb_path)
         if img_rgb is None:
             continue
@@ -89,9 +94,18 @@ def export_yolo_dataset(records: list[PairRecord], plain_label_dir: str | Path,
         else:
             raise ValueError(mode)
 
-        # 4ch 는 손실 있는 JPG 로 못 담음 → TIFF (ultralytics multichannel 규약)
-        ext = ".tiff" if mode == "stack4" else ".jpg"
-        cv2.imwrite(str(out_root / "images" / rec.split / f"{rec.pair_id}{ext}"), out_img)
+        # 학습용 다운스케일 (라벨은 정규화 좌표라 불변). 원본 프레임은 그대로 유지.
+        # 근거(2026-07-28): 4K 원본 그대로 내보내면 5개 데이터셋 수십~수백 GB(디스크 9GB 여유),
+        # 다워커 4K 디코드로 16GB RAM 고갈. imgsz=640 학습엔 max-side 960이면 충분.
+        if max_side and max(out_img.shape[:2]) > max_side:
+            s = max_side / max(out_img.shape[:2])
+            out_img = cv2.resize(out_img, (round(out_img.shape[1] * s),
+                                           round(out_img.shape[0] * s)),
+                                 interpolation=cv2.INTER_AREA)
+        # 4ch 는 손실 있는 JPG 로 못 담음 → TIFF (ultralytics multichannel 규약, LZW 압축)
+        params = [int(cv2.IMWRITE_TIFF_COMPRESSION), 5] if mode == "stack4" else []
+        cv2.imwrite(str(out_root / "images" / rec.split / f"{rec.pair_id}{ext}"),
+                    out_img, params)
         lbl = Path(plain_label_dir) / f"{rec.pair_id}.txt"
         if lbl.exists():
             (out_root / "labels" / rec.split / lbl.name).write_text(lbl.read_text())

@@ -17,6 +17,25 @@ Last updated: 2026-07-25 (school Windows PC, torch_env).
 - Self-tests: `scripts/08` PASS, `scripts/11` PASS
 - Config: all data paths → sibling `../data` (= `maritime/data`). Run all scripts from `code/`.
 
+## Overnight sweep architecture (2026-07-28 evening, 12h unattended window)
+Three OOM crashes diagnosed to ONE root cause: **16 GB system RAM exhaustion** (workers=8
+prefetching 4K frames; cv2 CPU alloc fail → disguised CUDA "OOM with VRAM free"), plus a
+second hard limit found: **C: had only 9 GB free** (full-res exports would need 100+ GB).
+Fixes, in order:
+1. `train.workers: 2` in config; scripts/04 passes it.
+2. `fusion.export_max_side: 960` — export downscales training copies (labels are normalized
+   → invariant; originals untouched; imgsz=640 unaffected). Disk ~19 GB total, decode 24× faster.
+3. TIFF LZW compression for stack4; export made idempotent (skip existing files).
+4. scripts/04 restructured: export all 5 datasets first, then **seed-OUTER loop**
+   (seed0 across all baselines first → best Table-2 row coverage in a 12h window);
+   completed runs auto-skipped via results.csv row count (restart-safe).
+5. `_run_sweep.py`: **detached runner** (Start-Process, survives session restarts — earlier
+   session restart killed an in-flight sweep), keep-awake via SetThreadExecutionState
+   (no system settings changed), OOM batch downgrade 8→6→4.
+6. `_watch_sweep.py`: read-only live viewer for VS Code terminal (safe to close anytime).
+7. W&B: enabled (ultralytics settings), account `boyamie`, runs appear per-baseline.
+Old 4K exports + smoke outputs deleted (~22 GB reclaimed → 30.9 GB free).
+
 ## ⚠️ ENCODING GOTCHA (must apply to every script run on this machine)
 This is a Korean-locale Windows box (default `open()` codec = cp949). 13 scripts do
 `yaml.safe_load(open(sys.argv[1]))` with NO encoding, so they crash reading the UTF-8
@@ -136,7 +155,7 @@ weights or lower coarse_thr only with visual re-verification.
 | group | status | source |
 |---|---|---|
 | Dataset stats (counts, per-scene, ship-size dist.) | ⏳ | scripts/01,02,14 — N=9660 pairs measured |
-| Alignment metrics (IoU vs landmarks, inliers, reproj, success rate) | 🔴 | auto-align 2/9660 — see CRITICAL FINDING |
+| Alignment metrics (success rate, inliers, reproj) | ✅ | **XoFTR full realign (2026-07-28): 58.4% (5,645/9,660); day 72.9% / night 42.9%; mean reproj 2.64 px; median inliers 44.** Filled into §4.2 (4 placeholders), verified in compiled PDF. Landmark-based metric (i) still needs manual correspondence subset. |
 | IAA (kappa / F1) | ⏳ | scripts/13 |
 | Detection mAP per baseline (RGB / IR / early / late / middle) | ⏳ | scripts/04,05,06,07 |
 | Robustness (drop_rgb, drop_ir, ir_contrast40, ir_noise03) | ⏳ | scripts/09 |
