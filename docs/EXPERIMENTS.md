@@ -76,7 +76,7 @@ IR = Hanwha QUANTUM RED, RGB = iPhone 14.
 | distance range to vessels | **not instrumented** — paper now declines to quote a range and points to the ship-size distribution instead | ✅ | author |
 | # daytime / nighttime | **9 day / 13 night source videos** (written as "source videos", not "sessions") | ✅ | file inventory |
 | location description | GPS coordinates — author will disclose to that granularity | 🙋 | author (needs the actual coordinates) |
-| dates / season | read from source-file timestamps | ⏳ | file mtime probe on school PC |
+| dates / season | **single capture day 2023-02-17 (winter); day 14:17–15:32 KST, night 21:03–21:49 KST** (from QuickTime `mvhd` creation_time, all 44 files; file mtimes were useless copy-dates 2026-05-13) | ✅ | container metadata probe (school PC, 2026-07-28) |
 | scene types | **open water / nearshore / bridge** — "bridge" added as a new `scene_type` category (tall foreground structure ⇒ worst-case parallax, ties to §4.2) | ✅ | author |
 
 ### §3.4 Synchronization (author answers 2026-07-26)
@@ -99,11 +99,44 @@ IR = Hanwha QUANTUM RED, RGB = iPhone 14.
 | §3.2 HDR / stabilization | — | 🙋 | author (iPhone capture setting, not in file header) |
 | Zenodo DOI | — | ⏳ | mint after upload |
 
+## 🔴 CRITICAL FINDING (2026-07-25/28, school PC): automated alignment fails on this data
+`scripts/01` completed over all N=9660 pairs: **aligned 2 / 9660 (0.02%)**; day 0.04%, night 0.00%.
+The 2 successes are accurate (reproj 0.95 px, median inliers 26) — the method isn't buggy,
+cross-modal SIFT just can't find ≥15 inliers between wide iPhone RGB and zoomed 640×480 IR.
+Diagnostic sweep (6 representative pairs; downscale-SIFT / gradient-map-SIFT / AKAZE):
+best variant peaks at ~6 inliers (threshold 15) → NOT a tuning problem.
+**Home-session context makes it harder:** cameras were HAND-HELD on a moving vessel with ~1 s
+sync offset → homography varies per frame (per-session fixed H is invalid), and even a perfect
+per-frame H can't fix temporal displacement. Options (user decision pending, question was dismissed):
+(a) learned cross-modal matcher (LoFTR/SuperGlue-class) per frame, (b) reframe paper: release raw
+pairs + small manually-aligned landmark GT subset; report auto-align failure rate as a finding.
+Note: paper §3.4/§4.2/§6 were already rewritten at home (2026-07-26) to state the hand-held /
+parallax / offset reality — consistent with (b), but (a) can still be attempted on top.
+Unblocked regardless: rgb_only baseline, autolabel, dataset stats. Blocked: ir_only (needs warped
+labels or native IR labels), early/late/middle fusion, alignment-quality metrics.
+
+### → RESOLVED (2026-07-28): XoFTR learned matcher works
+User picked option (a). Tested LoFTR-outdoor (kornia): FAILED (2–9 matches, garbage warps —
+visible-visible training can't bridge the modality gap). Tested **XoFTR** (CVPR24W, visible↔thermal
+-trained, github.com/OnderT/XoFTR + official weights): **SUCCESS** on all 6 diagnostic pairs —
+113–464 matches, RANSAC inliers 11–53 vs SIFT's 0–4, reproj 1.9–2.8 px at original resolution,
+warp overlays visually verified correct (bridge/skyline/horizon/vessels all line up).
+Integration (committed to repo):
+- `third_party/XoFTR/` vendored (git dir stripped); weights at `weights/xoftr/*.ckpt` (gitignored)
+- `udias/data/align.py`: `align.method: sift|xoftr` dispatch, lazy singleton, same min-inlier gates
+- `scripts/01 --realign`: updates ONLY alignment fields on the existing manifest (preserves
+  label_path/split written by 02/03 — do NOT full-rebuild after autolabel)
+- `config/default.yaml`: `align.method: xoftr`, repo/ckpt paths, thresholds
+- deps added to torch_env: kornia 0.8.3 (LoFTR test), einops/yacs/loguru (XoFTR); gdown (weights DL)
+Full-corpus realign queued behind the autolabel→smoke chain (GPU contention). Borderline pairs
+(open-water 14, night 11 inliers vs threshold 15): keep 15 for the first pass; consider 840-res
+weights or lower coarse_thr only with visual re-verification.
+
 ### §4.3 / §5 Benchmark result tables (pages 4–6, 8)
 | group | status | source |
 |---|---|---|
-| Dataset stats (counts, per-scene, ship-size dist.) | ⏳ | scripts/01,02,14 |
-| Alignment metrics (IoU vs landmarks, inliers, reproj, success rate) | ⏳ | scripts/01,10 |
+| Dataset stats (counts, per-scene, ship-size dist.) | ⏳ | scripts/01,02,14 — N=9660 pairs measured |
+| Alignment metrics (IoU vs landmarks, inliers, reproj, success rate) | 🔴 | auto-align 2/9660 — see CRITICAL FINDING |
 | IAA (kappa / F1) | ⏳ | scripts/13 |
 | Detection mAP per baseline (RGB / IR / early / late / middle) | ⏳ | scripts/04,05,06,07 |
 | Robustness (drop_rgb, drop_ir, ir_contrast40, ir_noise03) | ⏳ | scripts/09 |
@@ -124,6 +157,24 @@ IR = Hanwha QUANTUM RED, RGB = iPhone 14.
 - §3.2 RGB resolution → `$1920\times1080$ or $3840\times2160$ (17 of the 22 clips at the latter)`
 - §3.2 RGB fps → `a frame rate of $25$--$60$~fps (predominantly $30$ or $60$~fps, ... variable $24$--$29$~fps)`
 - §3.4 stride sentence → time-based 0.5 s wording
+
+## Splits result (2026-07-28, after two-stage near-dup fix): PASS
+train 6554 fr / 15 videos (day 4015, night 2539) · val 1486 / 3 (246, 1240) · test 1620 / 4
+(753, 867) · total 9660 / 22. Video-level leakage ✓, near-dup: 6 pHash candidates → 0 confirmed
+by NCC ✓. ⚠️ scene_type is 'unknown' for ALL frames → stratification currently degenerates to
+time_of_day only. 🙋 Author must tag per-video scene types (open_water / nearshore / bridge)
+— then re-run 02 (deterministic, same seed) for true scene-stratified splits + per-scene eval.
+
+## Splits leakage check: false-positive fix (2026-07-28, school PC)
+First `scripts/02` run FAILED: 6 "near-duplicate" train↔holdout pairs (Night_10 ↔ Night_02,
+pHash≤6). Visual inspection (montage sent to author): all 6 are DIFFERENT scenes — dark
+night frames have so little entropy that pHash collides. Measured NCC: false positives
+0.886–0.900 vs same-video adjacent frames 0.942.
+FIX: `udias/data/splits.py check_near_duplicates` is now two-stage — pHash candidates are
+confirmed by zero-mean NCC (≥0.92, the measured separation boundary). Candidate and confirmed
+counts are both logged. Uniform/unreadable frames are conservatively treated as duplicates.
+→ Worth one sentence in §4.4 (leakage-controlled splits): "perceptual-hash candidates are
+verified by pixel-level correlation to remove low-entropy night-frame hash collisions."
 
 ## CORRECTION (2026-07-26, home): the edits above were NOT actually persisted
 The 2026-07-25 Overleaf "dual" project download (md5-identical to the local pre-edit

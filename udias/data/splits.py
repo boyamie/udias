@@ -81,8 +81,30 @@ def _hamming(a: int, b: int) -> int:
     return bin(a ^ b).count("1")
 
 
-def check_near_duplicates(records, phash_threshold: int = 6) -> bool:
-    """train vs holdout(val+test) 프레임의 pHash 해밍거리 <= 임계면 near-duplicate."""
+def _ncc(img_a_gray, img_b_gray, size: int = 128) -> float:
+    """zero-mean normalized cross-correlation (다운스케일 그레이) — pHash 후보 검증용."""
+    import cv2
+    a = cv2.resize(img_a_gray, (size, size)).astype(np.float32)
+    b = cv2.resize(img_b_gray, (size, size)).astype(np.float32)
+    a -= a.mean(); b -= b.mean()
+    denom = float(np.sqrt((a * a).sum() * (b * b).sum()))
+    if denom < 1e-6:                      # 완전 균일 프레임 → 판정 불가, 보수적으로 중복 취급
+        return 1.0
+    return float((a * b).sum() / denom)
+
+
+def check_near_duplicates(records, phash_threshold: int = 6,
+                          ncc_confirm: float = 0.92) -> bool:
+    """train vs holdout(val+test) near-duplicate 2단계 검사.
+
+    1단계: pHash 해밍거리 <= phash_threshold → 후보.
+    2단계: 후보를 화소 수준 NCC 로 검증 (>= ncc_confirm 만 진짜 중복).
+      야간 저조도 프레임은 엔트로피가 낮아 pHash 가 서로 다른 장면끼리도
+      충돌한다(2026-07-28 시각 검증: 충돌 4쌍 모두 상이한 장면). NCC 검증이
+      이런 위양성을 걸러낸다. 후보/확정 수를 모두 로그로 남긴다.
+      임계 0.92 근거(2026-07-28 실측): 위양성 6쌍 NCC 0.886–0.900,
+      같은 영상 인접 프레임(진짜 near-dup 수준) 0.942 → 0.92 가 분리 경계.
+    """
     import cv2
     from .align import imread_unicode
 
@@ -92,25 +114,42 @@ def check_near_duplicates(records, phash_threshold: int = 6) -> bool:
             return None
         return _phash(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
 
-    h_train = [(r.pair_id, phash_of(r)) for r in records if r.split == "train"]
-    h_hold = [(r.pair_id, phash_of(r)) for r in records if r.split in ("val", "test")]
-    h_train = [(p, h) for p, h in h_train if h is not None]
-    h_hold = [(p, h) for p, h in h_hold if h is not None]
+    h_train = [(r, phash_of(r)) for r in records if r.split == "train"]
+    h_hold = [(r, phash_of(r)) for r in records if r.split in ("val", "test")]
+    h_train = [(r, h) for r, h in h_train if h is not None]
+    h_hold = [(r, h) for r, h in h_hold if h is not None]
+
+    candidates = []
+    for rec_h, hh in h_hold:
+        for rec_t, ht in h_train:
+            if _hamming(hh, ht) <= phash_threshold:
+                candidates.append((rec_t, rec_h))
+                break
+
+    def gray_of(rec):
+        img = imread_unicode(rec.rgb_path)
+        return None if img is None else cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
     dups = []
-    for pid_h, hh in h_hold:
-        for pid_t, ht in h_train:
-            if _hamming(hh, ht) <= phash_threshold:
-                dups.append((pid_t, pid_h))
-                break
+    for rec_t, rec_h in candidates:
+        ga, gb = gray_of(rec_t), gray_of(rec_h)
+        if ga is None or gb is None:
+            dups.append((rec_t.pair_id, rec_h.pair_id, float("nan")))
+            continue
+        score = _ncc(ga, gb)
+        if score >= ncc_confirm:
+            dups.append((rec_t.pair_id, rec_h.pair_id, score))
+
+    print(f"[검사] near-duplicate 후보 {len(candidates)}쌍 (pHash≤{phash_threshold}) "
+          f"→ NCC≥{ncc_confirm} 확정 {len(dups)}쌍")
     if dups:
-        print(f"[누수] near-duplicate {len(dups)}쌍 (train↔holdout, pHash≤{phash_threshold}):")
-        for t, h in dups[:20]:
-            print(f"   - train:{t}  ~  holdout:{h}")
+        print(f"[누수] near-duplicate {len(dups)}쌍 (train↔holdout, pHash+NCC):")
+        for t, h, s in dups[:20]:
+            print(f"   - train:{t}  ~  holdout:{h}  (NCC={s:.3f})")
         if len(dups) > 20:
             print(f"   ... 외 {len(dups) - 20}쌍")
         return False
-    print(f"[검사] near-duplicate 없음 (pHash≤{phash_threshold}) ✓")
+    print(f"[검사] near-duplicate 없음 (pHash≤{phash_threshold} + NCC≥{ncc_confirm}) ✓")
     return True
 
 

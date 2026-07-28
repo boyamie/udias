@@ -31,9 +31,17 @@ split:
   near_duplicate_check: true              # perceptual hash로 split 간 유사 프레임 검사
   phash_threshold: 6                      # 해밍거리 임계값 (이하면 near-duplicate 의심)
 
-# ── ② 정렬 (SIFT + RANSAC, H 캐싱) ─────────────
+# ── ② 정렬 (method 선택 + RANSAC, H 캐싱) ─────────────
 align:
-  detector: sift                          # SURF 금지 (contrib nonfree → 재현성 문제)
+  # 2026-07-28: sift 는 본 데이터에서 2/9660(0.02%)만 정렬(교차모달 실패) → xoftr 로 전환.
+  # xoftr = 가시↔열 전용 학습 매처(XoFTR). 진단 6쌍에서 inlier 11~53, 워프 시각 검증 통과.
+  method: xoftr                           # xoftr | sift (sift 는 비교/재현용)
+  xoftr_repo: third_party/XoFTR
+  xoftr_ckpt: weights/xoftr/weights_xoftr_640.ckpt
+  xoftr_resize: 640                       # 긴 변 리사이즈 (640 가중치와 짝)
+  xoftr_coarse_thr: 0.3
+  xoftr_fine_thr: 0.1
+  detector: sift                          # (sift 경로용) SURF 금지 (contrib nonfree → 재현성 문제)
   ratio_test: 0.75
   ransac_reproj_thresh: 5.0
   min_inliers: 15                         # 이 미만이면 aligned=false로 기록 (fallback resize 금지)
