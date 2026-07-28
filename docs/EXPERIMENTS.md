@@ -176,6 +176,22 @@ counts are both logged. Uniform/unreadable frames are conservatively treated as 
 → Worth one sentence in §4.4 (leakage-controlled splits): "perceptual-hash candidates are
 verified by pixel-level correlation to remove low-entropy night-frame hash collisions."
 
+## Overleaf edits round 2 (2026-07-28, school PC, via Chrome find-replace — verified in compiled PDF)
+15 edits, all rendering confirmed on pages 3–4 (citations [13]/[14] resolve):
+- §3.3 filled: hand-held aboard vessel (10–20 cm baseline) · distance not instrumented (ship-size
+  distribution as proxy) · 9 day / 13 night source-video pairs · single winter day 17 Feb 2023
+  (day 14:17–15:32, night 21:03–21:49 KST, container timestamps) · scene types incl. bridge
+- §3.4 filled: manual simultaneous start · residual offset ~1 s (> 0.5 s sampling), stated as
+  least-controlled aspect · stale FRAME_INTERVAL=10 comments replaced
+- Table 1: Ours = 9,660 pairs
+- §4.2 REWRITTEN: SIFT fails 2/9,660 (0.02%) + diagnostics (AKAZE/gradient/LoFTR fail) reported
+  as a finding → released reference homographies via XoFTR + RANSAC; SIFT kept as documented baseline
+- Fig. 1 caption: SIFT+RANSAC → learned cross-modal matching (XoFTR) with RANSAC
+- §4.4: two-stage near-dup check (pHash → NCC ≥ 0.92) + split counts 6,554/1,486/1,620 (15/3/4)
+- Bib: added sun2021loftr (CVPR'21) + tuzcuoglu2024xoftr (CVPRW'24)
+Remaining red: alignment success rates (realign pending), review/IAA/benchmark numbers, and
+author-only: LWIR band wording, iPhone HDR setting, GPS coordinates.
+
 ## CORRECTION (2026-07-26, home): the edits above were NOT actually persisted
 The 2026-07-25 Overleaf "dual" project download (md5-identical to the local pre-edit
 main.tex) showed NONE of the §3.1/§3.2/§3.4 edits above — they were lost / not saved.

@@ -47,19 +47,26 @@ def check_multichannel_support() -> None:
             "(silent 3ch 학습을 막기 위해 중단합니다).")
 
 
-for name, kw in EXPERIMENTS.items():
-    data_yaml = export_yolo_dataset(records, plain_labels,
-                                    Path(P["outputs_dir"]) / "datasets" / name,
-                                    epsilon=cfg["fusion"]["early"]["epsilon"], **kw)
-    train_kw = {}
-    if kw["mode"] == "stack4":
-        check_multichannel_support()
-        # 색공간 augment 는 4ch 에서 의미가 없고 버전에 따라 실패 → 명시적 off
-        train_kw = dict(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0)
-    for seed in T["seeds"]:
-        model = YOLO(T["model"])
-        model.train(data=str(data_yaml), epochs=T["epochs"], imgsz=T["img_size"],
-                    batch=T["batch_size"], device=T["device"], seed=seed,
-                    project=str(Path(P["outputs_dir"]) / name),
-                    name=f"seed{seed}", exist_ok=True, deterministic=True,
-                    **train_kw)
+def main():
+    """Windows spawn-mode DataLoader 워커가 본 모듈을 재임포트하므로
+    학습 루프는 반드시 __main__ 가드 안에서 실행한다."""
+    for name, kw in EXPERIMENTS.items():
+        data_yaml = export_yolo_dataset(records, plain_labels,
+                                        Path(P["outputs_dir"]) / "datasets" / name,
+                                        epsilon=cfg["fusion"]["early"]["epsilon"], **kw)
+        train_kw = {}
+        if kw["mode"] == "stack4":
+            check_multichannel_support()
+            # 색공간 augment 는 4ch 에서 의미가 없고 버전에 따라 실패 → 명시적 off
+            train_kw = dict(hsv_h=0.0, hsv_s=0.0, hsv_v=0.0)
+        for seed in T["seeds"]:
+            model = YOLO(T["model"])
+            model.train(data=str(data_yaml), epochs=T["epochs"], imgsz=T["img_size"],
+                        batch=T["batch_size"], device=T["device"], seed=seed,
+                        project=str(Path(P["outputs_dir"]) / name),
+                        name=f"seed{seed}", exist_ok=True, deterministic=True,
+                        **train_kw)
+
+
+if __name__ == "__main__":
+    main()
