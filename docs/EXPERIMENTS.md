@@ -36,6 +36,30 @@ Fixes, in order:
 7. W&B: enabled (ultralytics settings), account `boyamie`, runs appear per-baseline.
 Old 4K exports + smoke outputs deleted (~22 GB reclaimed → 30.9 GB free).
 
+## Sweep crash post-mortem (2026-07-29, diagnosed REMOTELY from home via W&B output.log)
+Run logs are fully readable from home: W&B team entity `boyamie-pusan-national-university`,
+projects `udias-data-runs-<baseline>` (prefix changed to `udias-<baseline>` mid-sweep);
+GraphQL `files { directUrl }` → fetch `output.log`. Timeline (KST): rgb_only 21:44→03:12
+✅ mAP50 0.509 · ir_only 03:12→08:42 ✅ mAP50 0.021 · early_stack4 08:42 ❌ 39 s ·
+rgb_only RERUN 08:48→14:20 ✅ 0.480 · ir_only 14:20 ❌ 15:44 · ir_only retry 16:04→ 🟢.
+Two DISTINCT crash causes:
+1. **early_stack4 (run s6bwohit)**: `torch.OutOfMemoryError: CUDA out of memory. Tried to
+   allocate 14.00 MiB. GPU 0 total 8 GiB, 2.89 GiB free` — OOM-with-VRAM-free at training
+   start, right after dataset scan. Everything before it was healthy: 4-ch model built
+   (`Conv [4,64,3,2]`), 643/649 pretrained weights transferred, AMP checks passed, and the
+   aligned-only dataset scanned **3,812 train images ≈ 58.4% of 6,554** — the XoFTR
+   alignment gate is filtering exactly as designed. Fix: set
+   `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` and start stack4 at batch 4–6.
+2. **ir_only 2nd attempt (run ktiphfk0)**: `OSError: [Errno 28] No space left on device`
+   while saving last.pt — **C: filled up AGAIN** during the sweep (checkpoints+plots
+   ~80 MB/run, local `wandb/` cache). The in-flight retry risks the same death; disk
+   cleanup is the first job on returning to this machine.
+3. **Completion-check bug (why rgb_only ran twice, wasting 5.5 h)**: the auto-skip in
+   scripts/04 counts results.csv rows against `train.epochs` (100); a run that early-stops
+   writes fewer rows and is judged incomplete after a runner restart, so a finished
+   baseline re-trains from scratch. Fix: also accept EarlyStopping (e.g. best.pt present
+   AND trainer logged early stop) as complete.
+
 ## ⚠️ ENCODING GOTCHA (must apply to every script run on this machine)
 This is a Korean-locale Windows box (default `open()` codec = cp949). 13 scripts do
 `yaml.safe_load(open(sys.argv[1]))` with NO encoding, so they crash reading the UTF-8
