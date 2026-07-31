@@ -81,6 +81,25 @@ python scripts/05_eval_benchmark.py config/default.yaml                         
 ```
 Before step 1, sanity-check the stale runs the preflight prints (mtime should be <=07-27).
 
+## Pre-run verification on the Mac mini (2026-07-31 evening, cs310 env torch 2.5.1)
+- scripts/08 middle-fusion selftest: **PASS** (loss 2.55->0.47, box score 0.892) — tomorrow's
+  06 training path is healthy.
+- scripts/11 extensions selftest: **PASS** (stack4 4ch TIFF export, robustness determinism,
+  native warp IoU, transform hook/gate, native subset stratification, IAA, M14 figures).
+- config/default.yaml: fusion.late / eval.report_by / middle.* keys all present; 05/06 read
+  configs with encoding="utf-8" (cp949-safe). middle.pretrained:true downloads torchvision
+  weights on first run (school PC online — OK).
+- scripts/05 hardened: img_size_lookup raises a clear FileNotFoundError instead of a silent
+  AttributeError; late-fusion weight loading now fail-fast per seed with an explicit [skip]
+  message; aggregate guarded when late fusion is skipped.
+**⚠️ noalign ablation interpretation caveat (design, not a bug)**: use_alignment=False
+exports do NOT filter to aligned pairs — noalign trains/evals on the FULL split (6,554 train)
+while early_stack4 uses the aligned-only subset (3,812). A noalign-vs-stack4 gap therefore
+mixes (i) alignment contribution and (ii) training-set size/composition. The frozen-test
+protocol of §5.4 (scripts/05: full test set, alignment failures count as misses for aligned
+models) is the intended headline comparison; for a cleaner isolation consider a follow-up
+noalign variant restricted to the aligned subset. State this when writing the ablation row.
+
 ## ⚠️ ENCODING GOTCHA (must apply to every script run on this machine)
 This is a Korean-locale Windows box (default `open()` codec = cp949). 13 scripts do
 `yaml.safe_load(open(sys.argv[1]))` with NO encoding, so they crash reading the UTF-8

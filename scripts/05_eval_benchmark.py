@@ -23,6 +23,8 @@ _size_cache = {}
 def img_size_lookup(rec):
     if rec.pair_id not in _size_cache:
         im = imread_unicode(rec.rgb_path)
+        if im is None:                     # 파일 유실 시 조용한 AttributeError 대신 명시적 실패
+            raise FileNotFoundError(f"RGB frame unreadable: {rec.rgb_path} (pair {rec.pair_id})")
         _size_cache[rec.pair_id] = (im.shape[1], im.shape[0])
     return _size_cache[rec.pair_id]
 
@@ -96,8 +98,15 @@ for name, make_input in MODELS.items():
 # late fusion: rgb/ir 시드 쌍으로 앙상블
 per_seed = []
 for seed in T["seeds"]:
-    m_rgb = YOLO(str(Path(P["outputs_dir"]) / "rgb_only" / f"seed{seed}" / "weights" / "best.pt"))
-    m_ir  = YOLO(str(Path(P["outputs_dir"]) / "ir_only"  / f"seed{seed}" / "weights" / "best.pt"))
+    w_rgb = Path(P["outputs_dir"]) / "rgb_only" / f"seed{seed}" / "weights" / "best.pt"
+    w_ir  = Path(P["outputs_dir"]) / "ir_only"  / f"seed{seed}" / "weights" / "best.pt"
+    missing = [str(w) for w in (w_rgb, w_ir) if not w.exists()]
+    if missing:                            # 수 시간 추론 후가 아니라 즉시, 명확한 사유로 중단
+        print(f"[skip] late_fusion seed{seed}: 가중치 없음 → {missing}")
+        per_seed = []
+        break
+    m_rgb = YOLO(str(w_rgb))
+    m_ir  = YOLO(str(w_ir))
     preds = defaultdict(list)
     for rec in records:
         boxes, scores = predict_pair_late(rec, m_rgb, m_ir, cfg["fusion"]["late"],
@@ -107,7 +116,8 @@ for seed in T["seeds"]:
                                        "score": float(s)})
     per_seed.append(evaluate_by_scene(records, plain_labels, img_size_lookup,
                                       preds, tuple(E["report_by"])))
-all_results["late_fusion"] = aggregate_seeds(per_seed)
+if per_seed:
+    all_results["late_fusion"] = aggregate_seeds(per_seed)
 
 out = Path(P["outputs_dir"]) / "benchmark.json"
 out.write_text(json.dumps(all_results, indent=2))
