@@ -6,7 +6,13 @@
   early_pixel                   — Early fusion (variant): (RGB+ε)·IR/255
   early_stack4_noalign          — Early, no alignment: 4ch, IR resize (정렬 ablation)
 
-usage: python scripts/04_train_baselines.py config/default.yaml
+usage: python scripts/04_train_baselines.py config/default.yaml [--force name1,name2|all]
+
+--force: 완료 판정을 무시하고 지정 베이스라인을 재학습한다.
+  예) --force early_stack4_noalign
+  (2026-07-31 진단: noalign 이 sweep 에서 한 번도 돌지 않은 원인은 W&B 활성화
+  이전(≤07-27)의 구버전 학습이 남긴 results.csv(≥100행)를 완료로 오인한 것.
+  구 export/구 정렬 기준 결과라 현재 수치와 비교 불가 → --force 로 재학습할 것.)
 
 주의(stack4): 4채널 학습은 ultralytics 의 multichannel 지원(TIFF 입력 +
 data.yaml 의 `channels:` 키)을 사용한다. 구버전 ultralytics 는 이 키를
@@ -21,7 +27,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from udias.data.manifest import load_manifest
 from udias.fusion.early import export_yolo_dataset
 
-cfg = yaml.safe_load(open(sys.argv[1] if len(sys.argv) > 1 else "config/default.yaml", encoding="utf-8"))
+_args = [a for a in sys.argv[1:] if not a.startswith("--")]
+FORCE = set()
+for _i, _a in enumerate(sys.argv):
+    if _a == "--force" and _i + 1 < len(sys.argv):
+        FORCE = set(sys.argv[_i + 1].split(","))
+    elif _a.startswith("--force="):
+        FORCE = set(_a.split("=", 1)[1].split(","))
+cfg = yaml.safe_load(open(_args[0] if _args else "config/default.yaml", encoding="utf-8"))
 P, T = cfg["paths"], cfg["train"]
 plain_labels = Path(P["labels_dir"]) / "plain"
 records = load_manifest(P["manifest"])
@@ -69,16 +82,42 @@ def main():
                            if kw["mode"] == "stack4" else {})
 
     out_root = Path(P["outputs_dir"])
+
+    # ---- 프리플라이트: 모든 (name, seed) 의 완료 상태와 그 근거를 먼저 출력 ----
+    # (noalign 이 조용히 스킵되던 사고 방지: 스킵 사유가 반드시 화면에 남는다)
+    import datetime
+    print("=== preflight ===")
+    for name in EXPERIMENTS:
+        for seed in T["seeds"]:
+            run_dir = out_root / name / f"seed{seed}"
+            rcsv, done = run_dir / "results.csv", run_dir / "DONE"
+            if done.exists():
+                st = f"DONE marker ({done.read_text(encoding='utf-8').strip()})"
+            elif rcsv.exists():
+                rows = max(0, len(rcsv.read_text(encoding="utf-8").splitlines()) - 1)
+                mt = datetime.datetime.fromtimestamp(rcsv.stat().st_mtime).strftime("%m-%d %H:%M")
+                st = f"results.csv rows={rows} mtime={mt}" + (" -> WILL SKIP (legacy)" if rows >= T["epochs"] else " -> will train (incomplete)")
+            else:
+                st = "missing -> will train"
+            forced = " [FORCED retrain]" if (name in FORCE or "all" in FORCE) else ""
+            print(f"  {name}/seed{seed}: {st}{forced}")
+
     for seed in T["seeds"]:
         for name in EXPERIMENTS:
-            # 완료 판정: results.csv 의 epoch 행 수 ≥ 목표 epochs.
-            # (best.pt 는 학습 도중에도 생기므로 완료 마커로 쓰면 중단 런을 건너뛴다)
-            rcsv = out_root / name / f"seed{seed}" / "results.csv"
-            if rcsv.exists():
-                n_done = max(0, len(rcsv.read_text(encoding="utf-8").splitlines()) - 1)
-                if n_done >= T["epochs"]:
-                    print(f"[skip] {name}/seed{seed} 이미 완료 ({n_done} epochs)")
+            run_dir = out_root / name / f"seed{seed}"
+            rcsv, done = run_dir / "results.csv", run_dir / "DONE"
+            if name not in FORCE and "all" not in FORCE:
+                # 완료 판정: DONE 마커(신규, early-stop 도 완료로 인정) 또는
+                # 레거시 판정(results.csv 행 수 ≥ epochs — early-stop 런을 놓치는
+                # 구버전 규칙이지만 마커 없는 기존 완주 런의 하위호환용으로 유지)
+                if done.exists():
+                    print(f"[skip] {name}/seed{seed} DONE 마커 존재")
                     continue
+                if rcsv.exists():
+                    n_done = max(0, len(rcsv.read_text(encoding="utf-8").splitlines()) - 1)
+                    if n_done >= T["epochs"]:
+                        print(f"[skip] {name}/seed{seed} 레거시 완료 판정 ({n_done} epochs) — 재학습하려면 --force {name}")
+                        continue
             model = YOLO(T["model"])
             model.train(data=str(yamls[name]), epochs=T["epochs"], imgsz=T["img_size"],
                         batch=T["batch_size"], device=T["device"], seed=seed,
@@ -86,6 +125,11 @@ def main():
                         project=str(Path(P["outputs_dir"]) / name),
                         name=f"seed{seed}", exist_ok=True, deterministic=True,
                         **train_kws[name])
+            # 정상 반환 = 완주(early stopping 포함). 마커를 남겨 재시작 시
+            # 행 수와 무관하게 스킵되게 한다 (rgb_only seed0 이중 학습 사고 방지).
+            done.write_text(datetime.datetime.now().strftime("%Y-%m-%d %H:%M"), encoding="utf-8")
+            # 한 번 강제 재학습했으면 같은 sweep 내 다음 seed 부터는 정상 판정
+            # 로직이 새 결과를 존중한다 (마커가 방금 생겼으므로 자연 스킵 없음).
 
 
 if __name__ == "__main__":

@@ -60,6 +60,27 @@ Two DISTINCT crash causes:
    baseline re-trains from scratch. Fix: also accept EarlyStopping (e.g. best.pt present
    AND trainer logged early stop) as complete.
 
+## noalign-skip diagnosis + scripts/04 hardening (2026-07-31, from home)
+**Why early_stack4_noalign never ran in the sweep**: the completion check found
+`data/runs/early_stack4_noalign/seed{0,1,2}/results.csv` with >=100 rows — leftovers of a
+pre-W&B (<=07-27) training on the OLD exports/alignment. Those numbers are NOT comparable
+to the current sweep (960px exports, XoFTR-realigned manifest) and must be re-run.
+scripts/04 changes (pushed):
+1. `--force name1,name2|all` — retrain named baselines ignoring completion.
+2. Preflight table printed at start: every (name, seed) with its skip reason
+   (DONE marker / results.csv rows+mtime / missing) — no more silent skips.
+3. `DONE` marker written after each successful model.train() return (covers
+   early-stopped runs) — fixes the rgb_only double-run bug; legacy row-count
+   check kept for marker-less completed runs.
+**RUNBOOK (school PC, in order):**
+```
+git pull
+python scripts/04_train_baselines.py config/default.yaml --force early_stack4_noalign   # ~3.4h x3 seeds
+python scripts/06_train_middle_fusion.py config/default.yaml                            # middle fusion x3 seeds
+python scripts/05_eval_benchmark.py config/default.yaml                                 # late fusion needs NO training - eval only (uses rgb/ir best.pt)
+```
+Before step 1, sanity-check the stale runs the preflight prints (mtime should be <=07-27).
+
 ## ⚠️ ENCODING GOTCHA (must apply to every script run on this machine)
 This is a Korean-locale Windows box (default `open()` codec = cp949). 13 scripts do
 `yaml.safe_load(open(sys.argv[1]))` with NO encoding, so they crash reading the UTF-8
